@@ -1,0 +1,103 @@
+@font-face {
+  font-family: 'Galmuri11';
+  src: url('/fonts/Galmuri11.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Galmuri11';
+  src: url('/fonts/Galmuri11-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Pretendard';
+  src: url('/fonts/Pretendard-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-family: 'Pretendard', sans-serif;
+}
+
+/* 피격 시 화면 가장자리 붉은 플래시 (부드럽게, 무섭지 않게) */
+@keyframes damage-flash {
+  0% { opacity: 0.55; }
+  100% { opacity: 0; }
+}
+.damage-flash {
+  animation: damage-flash 0.45s ease-out forwards;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(232, 93, 93, 0.65) 100%);
+}
+
+/* 랜딩 전경 원시인 — 잔잔한 상하 흔들림 */
+@keyframes cavemanIdle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2.5%); } }
+.caveman-idle { animation: cavemanIdle 2.4s ease-in-out infinite; }
+
+/* 🐛 랜딩 곤충들 둥실둥실 */
+@keyframes bugFloat {
+  0%, 100% { transform: translate(0, 0) rotate(-4deg); }
+  50% { transform: translate(14px, -18px) rotate(5deg); }
+}
+
+/* 💸 슈퍼챗 — 오른쪽에서 톡 튀어나오며 살짝 흔들림 */
+@keyframes superchatPop {
+  0% { transform: translateX(40%) scale(0.8); opacity: 0; }
+  60% { transform: translateX(-4%) scale(1.05); opacity: 1; }
+  100% { transform: translateX(0) scale(1); opacity: 1; }
+}
+.superchat-pop { animation: superchatPop 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+
+/* 💡 팁 전환 — 살짝 떠오르며 나타남 */
+@keyframes tipFade { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: translateY(0); } }
+.tip-fade { animation: tipFade 0.35s ease-out both; }
+
+/* 🏆 보스 격파 '격파!' 플래시 (SFC 느낌) */
+@keyframes bossFlashBg { 0% { opacity: 0.85; } 25% { opacity: 0.15; } 100% { opacity: 0; } }
+.boss-flash-bg { animation: bossFlashBg 1.6s ease-out both; }
+@keyframes bossFlashPop {
+  0% { transform: scale(0.2) rotate(-8deg); opacity: 0; }
+  18% { transform: scale(1.25) rotate(3deg); opacity: 1; }
+  30% { transform: scale(1) rotate(0deg); }
+  80% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1.4) translateY(-20px); opacity: 0; }
+}
+.boss-flash { animation: bossFlashPop 1.6s cubic-bezier(0.2, 1.5, 0.4, 1) both; }
+
+/* 🏆 전리품 카드 등장 + 콘페티 */
+@keyframes lootPop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
+.loot-pop { animation: lootPop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+@keyframes confettiFall {
+  0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(85vh) rotate(720deg); opacity: 0.9; }
+}
+.confetti-bit { position: absolute; top: 0; width: 10px; height: 14px; border-radius: 2px; animation: confettiFall linear both; }
+
+/* 💸 슈퍼챗 받기 스플래시 — 화려한 코인 폭발 */
+@keyframes splashText {
+  0% { transform: scale(0.3); opacity: 0; }
+  30% { transform: scale(1.3); opacity: 1; }
+  70% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1.5) translateY(-34px); opacity: 0; }
+}
+.splash-text { animation: splashText 1.05s cubic-bezier(0.2, 1.3, 0.4, 1) both; }
+@keyframes splashCoin {
+  0% { transform: translate(0, 0) scale(0.4) rotate(0deg); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translate(var(--tx), var(--ty)) scale(1) rotate(var(--rot)); opacity: 0; }
+}
+.splash-coin { animation: splashCoin 1s ease-out both; }
+@keyframes splashRing { 0% { transform: scale(0.2); opacity: 0.9; } 100% { transform: scale(2.8); opacity: 0; } }
+.splash-ring { animation: splashRing 0.8s ease-out both; }
+@keyframes splashFlash { 0% { transform: scale(0.4); opacity: 0.75; } 100% { transform: scale(2.4); opacity: 0; } }
+.splash-flash { animation: splashFlash 0.6s ease-out both; filter: blur(10px); }
