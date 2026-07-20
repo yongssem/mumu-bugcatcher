@@ -13,6 +13,7 @@ import { MATERIALS, NODES, RECIPES } from '../game/bugcraft.js'
 import { loadInventory, addMaterial, craftItem, useItem } from '../save/inventory.js'
 import { HABITATS, DEFAULT_HABITAT } from '../game/habitats.js'
 import { BugViewModel } from '../game/BugVM.js'
+import { buildMega } from '../game/megaProps.js'
 
 const PVOX = 0.22
 const col = (h) => new THREE.Color(h)
@@ -158,6 +159,21 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     for (let i = 0; i < 84; i++) { const a = hash3(i, 31, 5) * Math.PI * 2, r = 1.6 + hash3(i, 32, 7) * (R - 1.8); tuft(Math.cos(a) * r, Math.sin(a) * r, i) }
     for (let i = 0; i < 11; i++) { const a = hash3(i, 41, 3) * Math.PI * 2, r = 3 + hash3(i, 42, 8) * (R - 4.5); bush(Math.cos(a) * r, Math.sin(a) * r, i) }
     for (let i = 0; i < 6; i++) { const a = hash3(i, 51, 9) * Math.PI * 2, r = 3 + hash3(i, 52, 2) * (R - 4.5); rock(Math.cos(a) * r, Math.sin(a) * r) }
+
+    // 🪀 거대 인간세계 랜드마크 — 경계 밖에 우뚝 세워 '작아져서 뒷마당에 들어온' 스케일감
+    if (H.mega) H.mega.forEach((type, i) => {
+      const g = buildMega(type); if (!g) return
+      const a = (i / H.mega.length) * Math.PI * 2 + 0.7
+      const r = R + 1.8
+      g.rotation.y += a + Math.PI + (hash3(i, 61, 3) - 0.5) * 0.6
+      g.scale.setScalar(1.6 + hash3(i, 62, 5) * 0.5)
+      g.position.set(Math.cos(a) * r, 0, Math.sin(a) * r)
+      g.updateMatrixWorld(true)
+      const box = new THREE.Box3().setFromObject(g)     // 자동으로 바닥에 앉히기
+      const sink = ['baseball', 'marble', 'gumball', 'dice', 'acorn'].includes(type) ? 0.7 : 0.15
+      g.position.y = -box.min.y - sink                  // 최저점을 바닥에 맞추고 살짝 파묻기
+      scene.add(g)
+    })
 
     // 🧱 조합대 (월드 중앙 근처 랜드마크 — 여기서 파밍한 소재로 포획 블럭을 만든다는 상징)
     const bench = new THREE.Group(); bench.position.set(1.6, 0, -1.6)

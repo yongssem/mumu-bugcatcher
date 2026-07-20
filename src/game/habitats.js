@@ -12,6 +12,7 @@ export const HABITATS = {
     ground: ['#6AB150', '#60A448'],
     grassColors: ['#5FA34A', '#66AE4E', '#579B42'], grassN: 32,
     flowers: { petals: ['#F5F0F0', '#F49BC1', '#F2C14E'], n: 4 }, mushroomN: 2, extra: null,
+    mega: ['baseball', 'redcap', 'coin'], // ⚾ 거대 인간세계 랜드마크
     pool: [
       { id: 'byeoMettugi', s: 1.0, fly: 0, spd: 1.4, shy: 1.0 },
       { id: 'bangAkkaeBi', s: 1.1, fly: 0, spd: 1.5, shy: 1.0 },
@@ -35,6 +36,7 @@ export const HABITATS = {
     ground: ['#78BE58', '#6AAF4C'],
     grassColors: ['#63A84C', '#6EB552'], grassN: 22,
     flowers: { petals: ['#F49BC1', '#C9A8F0', '#F2C14E', '#F5F0F0', '#F27EA8', '#8FD0F0'], n: 12 }, mushroomN: 0, extra: null,
+    mega: ['juice', 'marble', 'crayon'], // 🧃 주스갑·구슬·크레용
     pool: [
       { id: 'hoRangNabi', s: 1.3, fly: 2.2, spd: 1.6, shy: 0.7 },
       { id: 'norangNabi', s: 1.1, fly: 2.0, spd: 1.5, shy: 0.7 },
@@ -57,6 +59,7 @@ export const HABITATS = {
     ground: ['#2E4A2A', '#284224'],
     grassColors: ['#2E4A28', '#35522E'], grassN: 20,
     flowers: { petals: ['#C9A8F0', '#8FD0F0'], n: 2 }, mushroomN: 6, extra: 'tree',
+    mega: ['acorn', 'dice', 'stick'], // 🌰 도토리·주사위·막대기
     pool: [
       { id: 'jangSuPungDeng', s: 1.6, fly: 0, spd: 1.2, shy: 0.9, big: true },
       { id: 'saseumBeolle', s: 1.5, fly: 0, spd: 1.1, shy: 0.9, big: true },
@@ -79,6 +82,7 @@ export const HABITATS = {
     ground: ['#4E9A6A', '#458C60'],
     grassColors: ['#3E8A5A', '#489A64', '#5AAE74'], grassN: 26,
     flowers: { petals: ['#F5F0F0', '#F2C14E'], n: 3 }, mushroomN: 0, extra: 'lily',
+    mega: ['soda', 'duck', 'marble'], // 🥤 탄산캔·고무오리·구슬
     pool: [
       { id: 'gochuJamJari', s: 1.1, fly: 1.8, spd: 2.2, shy: 0.9 },
       { id: 'milJamJari', s: 1.1, fly: 1.8, spd: 2.0, shy: 0.9 },
