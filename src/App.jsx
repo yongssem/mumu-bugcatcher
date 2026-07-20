@@ -5,6 +5,7 @@ import Landing from './ui/Landing.jsx'
 import Menu from './ui/Menu.jsx'
 import Bugpedia from './ui/Bugpedia.jsx'
 import Careers from './ui/Careers.jsx'
+import MicroScene from './ui/MicroScene.jsx'
 import { playBgm } from './game/bgm.js'
 
 export default function App() {
@@ -13,7 +14,7 @@ export default function App() {
   // 🎵 BGM — 화면에 맞는 곡 (곤충 오픈월드는 밝은 크리에이터 무드 재사용)
   useEffect(() => {
     if (screen === 'landing' || screen === 'menu' || screen === 'careers') playBgm('landing')
-    else if (screen === 'pedia') playBgm('creator')
+    else if (screen === 'pedia' || screen === 'micro') playBgm('creator')
   }, [screen])
 
   // 📱 글로벌 UI 스케일 — 루트 폰트 크기를 뷰포트에 맞춰 조절
@@ -34,8 +35,9 @@ export default function App() {
   }, [])
 
   if (screen === 'landing') return <Landing onStart={() => setScreen('menu')} />
-  if (screen === 'menu') return <Menu onOpen={(k) => setScreen(k === 'pedia' ? 'pedia' : k === 'careers' ? 'careers' : 'menu')} />
+  if (screen === 'menu') return <Menu onOpen={(k) => setScreen(['pedia', 'careers', 'micro'].includes(k) ? k : 'menu')} />
   if (screen === 'pedia') return <Bugpedia onClose={() => setScreen('menu')} />
   if (screen === 'careers') return <Careers onBack={() => setScreen('menu')} />
+  if (screen === 'micro') return <MicroScene onBack={() => setScreen('menu')} />
   return null
 }

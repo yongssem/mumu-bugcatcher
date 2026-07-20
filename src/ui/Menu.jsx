@@ -32,11 +32,11 @@ export default function Menu({ onOpen }) {
           onClick={() => onOpen('pedia')}
         />
         <Card
-          icon="🥅"
-          title="채집 나가기"
-          desc="오픈월드에서 잠자리채로 곤충을 잡아요"
-          badge="준비 중"
-          onClick={() => soon('🥅 오픈월드 채집은 곧 만나요! 지금은 도감을 둘러보세요.')}
+          icon="🔬"
+          title="곤충월드 가기"
+          desc="몸을 작게 줄여 곤충 사이로! (미리보기)"
+          badge="미리보기"
+          onClick={() => onOpen('micro')}
         />
         <Card
           icon="💼"
