@@ -50,6 +50,18 @@ body,
   50% { transform: translate(14px, -18px) rotate(5deg); }
 }
 
+/* 🎬 인트로 컷신 */
+@keyframes cutWalk { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-7px) rotate(2deg); } }
+@keyframes cutBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes cutPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(120, 240, 120, 0.5); transform: scale(1); }
+  50% { box-shadow: 0 0 20px 8px rgba(120, 240, 120, 0.95); transform: scale(1.12); }
+}
+@keyframes cutFlash { 0% { opacity: 0; } 35% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes cutDrift { from { transform: translateX(-30px); } to { transform: translateX(30px); } }
+@keyframes cutSparkle { 0% { transform: scale(0) rotate(0); opacity: 0; } 45% { opacity: 1; } 100% { transform: scale(1.5) rotate(120deg); opacity: 0; } }
+@keyframes cutCaption { 0% { opacity: 0; transform: translateY(8px); } 100% { opacity: 1; transform: translateY(0); } }
+
 /* 💸 슈퍼챗 — 오른쪽에서 톡 튀어나오며 살짝 흔들림 */
 @keyframes superchatPop {
   0% { transform: translateX(40%) scale(0.8); opacity: 0; }

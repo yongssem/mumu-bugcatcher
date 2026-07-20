@@ -2,6 +2,7 @@
 // ※ 오픈월드 채집 루프(GameScreen)는 다음 단계에서 연결 예정
 import { useState, useEffect } from 'react'
 import Landing from './ui/Landing.jsx'
+import Cutscene from './ui/Cutscene.jsx'
 import Menu from './ui/Menu.jsx'
 import Bugpedia from './ui/Bugpedia.jsx'
 import Careers from './ui/Careers.jsx'
@@ -9,11 +10,11 @@ import MicroScene from './ui/MicroScene.jsx'
 import { playBgm } from './game/bgm.js'
 
 export default function App() {
-  const [screen, setScreen] = useState('landing') // 'landing' | 'menu' | 'pedia' | 'careers'
+  const [screen, setScreen] = useState('landing') // 'landing' | 'intro' | 'menu' | 'pedia' | 'careers' | 'micro'
 
   // 🎵 BGM — 화면에 맞는 곡 (곤충 오픈월드는 밝은 크리에이터 무드 재사용)
   useEffect(() => {
-    if (screen === 'landing' || screen === 'menu' || screen === 'careers') playBgm('landing')
+    if (screen === 'landing' || screen === 'intro' || screen === 'menu' || screen === 'careers') playBgm('landing')
     else if (screen === 'pedia' || screen === 'micro') playBgm('creator')
   }, [screen])
 
@@ -34,7 +35,8 @@ export default function App() {
     }
   }, [])
 
-  if (screen === 'landing') return <Landing onStart={() => setScreen('menu')} />
+  if (screen === 'landing') return <Landing onStart={() => setScreen('intro')} />
+  if (screen === 'intro') return <Cutscene onDone={() => setScreen('menu')} />
   if (screen === 'menu') return <Menu onOpen={(k) => setScreen(['pedia', 'careers', 'micro'].includes(k) ? k : 'menu')} />
   if (screen === 'pedia') return <Bugpedia onClose={() => setScreen('menu')} />
   if (screen === 'careers') return <Careers onBack={() => setScreen('menu')} />
