@@ -27,6 +27,12 @@ export const NODES = {
 //   stun = 폭탄(범위 기절) · sleep = 마취 다트(재움) · trap = 함정(밟으면 가둠)
 export const RECIPES = [
   {
+    id: 'net', name: '잠자리채', icon: '🥅', mode: 'tool',
+    cost: { twig: 2, leaf: 2 },
+    effect: '얌전한 곤충 포획',
+    desc: '나뭇가지와 잎으로 엮은 채집망. 만들어야 곤충을 잡을 수 있어요. (한 번 만들면 계속 사용)',
+  },
+  {
     id: 'bomb', name: '폭탄 블럭', icon: '💣', mode: 'stun',
     cost: { sap: 2, pollen: 1 },
     effect: '던져서 범위 기절',

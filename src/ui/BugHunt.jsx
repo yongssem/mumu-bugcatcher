@@ -12,6 +12,7 @@ import { recordCatch, bugpediaProgress } from '../save/bugpedia.js'
 import { MATERIALS, NODES, RECIPES } from '../game/bugcraft.js'
 import { loadInventory, addMaterial, craftItem, useItem } from '../save/inventory.js'
 import { HABITATS, DEFAULT_HABITAT } from '../game/habitats.js'
+import { BugViewModel } from '../game/BugVM.js'
 
 const PVOX = 0.22
 const col = (h) => new THREE.Color(h)
@@ -41,7 +42,6 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
   const [tool, setTool] = useState('trowel')
   const [toast, setToast] = useState(null)
   const [locked, setLocked] = useState(false)
-  const [swing, setSwing] = useState(0)
   const [showCraft, setShowCraft] = useState(false)
 
   // 조합: 소재 차감 + 포획 블럭 +1 (React 쪽에서 처리 — 패널이 React라서)
@@ -71,6 +71,8 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     camera.rotation.order = 'YXZ'
     scene.add(new THREE.HemisphereLight(H.hemi[0], H.hemi[1], H.hemi[2]))
     const sun = new THREE.DirectionalLight(H.sun[0], H.sun[1]); sun.position.set(6, 12, 5); scene.add(sun)
+    scene.add(camera) // 카메라를 씬에 넣어야 부착된 1인칭 뷰모델이 렌더됨
+    const vm = new BugViewModel(camera) // 🖐️ 손+도구 1인칭 뷰모델
 
     // 땅 — 잔디 타일 (서식지 색)
     const tile = new THREE.BoxGeometry(1, 0.5, 1)
@@ -134,6 +136,29 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     if (H.extra === 'tree') { bigTree(-8, -6); bigTree(7.5, 5) }
     if (H.extra === 'lily') for (let i = 0; i < 6; i++) { const a = hash3(i, 21, 9) * Math.PI * 2, r = 2 + hash3(i, 22, 4) * (R - 2.5); lilyPad(Math.cos(a) * r, Math.sin(a) * r) }
 
+    // 🌿 빽빽한 풀숲 클러터 — 짧은 풀 다발·덤불·바위 (곤충이 사는 느낌)
+    const tuft = (x, z, seed) => {
+      const g = new THREE.Group(); g.position.set(x, 0, z)
+      const c = gc[Math.floor(hash3(seed, 1, 2) * gc.length) % gc.length]
+      const blades = []
+      for (let i = 0; i < 3; i++) { const a = hash3(seed, i, 3) * Math.PI * 2, rr = 0.06 + hash3(seed, i, 4) * 0.12, hh = 0.5 + hash3(seed, i, 5) * 0.6; blades.push(tube(Math.cos(a) * rr, 0, Math.sin(a) * rr, Math.cos(a) * rr * 1.5, hh, Math.sin(a) * rr * 1.5, 0.06, 0.02)) }
+      addV(g, blades, (px, py) => col(py > 0.35 ? '#4E8A3A' : c))
+      g.userData = { sway: 0.09, phase: hash3(seed, 6, 7) * 6 }; scene.add(g); swayers.push(g)
+    }
+    const bush = (x, z, seed) => {
+      const g = new THREE.Group(); g.position.set(x, 0, z)
+      addV(g, [ellipsoid(0, 0.36, 0, 0.55, 0.42, 0.55), ellipsoid(0.3, 0.52, 0.12, 0.34, 0.3, 0.34), ellipsoid(-0.26, 0.46, -0.22, 0.3, 0.28, 0.3)], (px, py) => col(py > 0.5 ? '#5FA34A' : gc[0]))
+      g.userData = { sway: 0.035, phase: hash3(seed, 3, 1) * 6 }; scene.add(g); swayers.push(g)
+    }
+    const rock = (x, z) => {
+      const g = new THREE.Group(); g.position.set(x, 0, z)
+      addV(g, [ellipsoid(0, 0.22, 0, 0.46, 0.3, 0.42), ellipsoid(0.28, 0.14, 0.1, 0.24, 0.18, 0.22)], (px, py) => col(py > 0.28 ? '#9AA0A6' : '#787E84'))
+      scene.add(g)
+    }
+    for (let i = 0; i < 84; i++) { const a = hash3(i, 31, 5) * Math.PI * 2, r = 1.6 + hash3(i, 32, 7) * (R - 1.8); tuft(Math.cos(a) * r, Math.sin(a) * r, i) }
+    for (let i = 0; i < 11; i++) { const a = hash3(i, 41, 3) * Math.PI * 2, r = 3 + hash3(i, 42, 8) * (R - 4.5); bush(Math.cos(a) * r, Math.sin(a) * r, i) }
+    for (let i = 0; i < 6; i++) { const a = hash3(i, 51, 9) * Math.PI * 2, r = 3 + hash3(i, 52, 2) * (R - 4.5); rock(Math.cos(a) * r, Math.sin(a) * r) }
+
     // 🧱 조합대 (월드 중앙 근처 랜드마크 — 여기서 파밍한 소재로 포획 블럭을 만든다는 상징)
     const bench = new THREE.Group(); bench.position.set(1.6, 0, -1.6)
     addV(bench, [tube(0, 0, 0, 0, 0.62, 0, 0.34, 0.3)], () => col('#7A5636'))
@@ -181,7 +206,11 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       m.scale.setScalar(t.s)
       const a = Math.random() * Math.PI * 2, r = edge ? R - 0.5 : rand(2, R - 1)
       m.position.set(Math.cos(a) * r, t.fly, Math.sin(a) * r)
-      m.userData.t = { ...t, wanderCd: 0, dir: new THREE.Vector3(), baseY: t.fly, tt: Math.random() * 6, caught: false, state: 'active', stateT: 0, ind: null }
+      m.userData.t = { ...t, wanderCd: 0, dir: new THREE.Vector3(0, 0, 1), baseY: t.fly, tt: Math.random() * 6, caught: false, state: 'active', stateT: 0, ind: null }
+      // 곤충별 이동 습성(gait) — 나비 나풀·잠자리 급선회·메뚜기 점프·개미 종종·딱정벌레 기기
+      const fam = BUGS[t.id]?.fam
+      m.userData.t.gait = t.fly > 0 ? (fam === 'dragonfly' ? 'dart' : fam === 'butterfly' ? 'flutter' : 'hover') : (fam === 'grasshopper' ? 'hop' : fam === 'bee' ? 'scuttle' : 'crawl')
+      m.userData.t.hopCd = Math.random() * 1.0; m.userData.t.hopping = false; m.userData.t.hopVy = 0
       scene.add(m); bugs.push(m)
       if (t.big) { const s = emojiSprite('👑'); if (s) { s.scale.setScalar(0.5); m.userData.t.crown = s; scene.add(s) } }
       // ✨ 희귀 곤충 출현 알림 (초기 스폰 제외)
@@ -190,11 +219,26 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     }
     for (let i = 0; i < MAX_BUGS; i++) spawn()
 
-    // 플레이어 상태
-    const player = { pos: new THREE.Vector3(0, 0, 0), yaw: 0, pitch: 0 }
-    const eye = 1.35
+    // 플레이어 상태 — y=발 높이, vy=수직속도, onGround
+    const player = { pos: new THREE.Vector3(0, 0, 0), yaw: 0, pitch: 0, y: 0, vy: 0, onGround: true }
+    const eye = 1.35 // 눈높이(발 기준)
     const keys = { f: false, b: false, l: false, r: false }
     const move = { touchFwd: false }
+
+    // 🧱 설치한 블럭 — 셀("ix,iz") → 높이(쌓인 칸 수). 위에 올라서거나 벽으로 막힘
+    const blockH = new Map()
+    const blockMeshes = [] // { key, mesh }
+    const cellKey = (x, z) => `${Math.floor(x)},${Math.floor(z)}`
+    const heightAt = (x, z) => blockH.get(cellKey(x, z)) || 0
+    const blockTopMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(H.ground[0]).multiplyScalar(1.15) })
+    const blockSideMat = new THREE.MeshLambertMaterial({ color: '#7A5636' })
+    const blockGeo = new THREE.BoxGeometry(1, 1, 1)
+    const blockMats = [blockSideMat, blockSideMat, blockTopMat, blockSideMat, blockSideMat, blockSideMat]
+    const addBlockMesh = (ix, iz, level) => {
+      const m = new THREE.Mesh(blockGeo, blockMats)
+      m.position.set(ix + 0.5, level + 0.5, iz + 0.5); scene.add(m)
+      blockMeshes.push({ key: `${ix},${iz},${level}`, mesh: m })
+    }
 
     // 파티클 (poof)
     const poofs = []
@@ -227,10 +271,51 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       return best
     }
 
-    // 🪏 채굴
+    // 🧱 블럭 설치/제거 — 우클릭 설치, 모종삽으로 제거 (마인크래프트식 건축)
+    const useMat = (mat) => { if ((invRef.current.mats[mat] || 0) < 1) return false; addMaterial(invRef.current, mat, -1); syncInv(); return true }
+    const placeBlock = () => {
+      vm.swing()
+      camera.getWorldDirection(dirV); dirV.y = 0
+      if (dirV.lengthSq() < 1e-4) return
+      dirV.normalize()
+      const ix = Math.floor(player.pos.x + dirV.x * 1.4), iz = Math.floor(player.pos.z + dirV.z * 1.4)
+      if (ix === Math.floor(player.pos.x) && iz === Math.floor(player.pos.z)) { notify('한 발짝 물러나서 설치해요'); return }
+      if (Math.hypot(ix + 0.5, iz + 0.5) > R) return
+      if (!useMat('dirt')) { notify('🟫 흙덩이가 필요해요 (🪏로 흙더미 캐기)'); return }
+      const lvl = blockH.get(`${ix},${iz}`) || 0
+      addBlockMesh(ix, iz, lvl); blockH.set(`${ix},${iz}`, lvl + 1)
+      poof(new THREE.Vector3(ix + 0.5, lvl + 0.5, iz + 0.5), '#8A5A34', 5)
+    }
+    const nearestBlock = () => {
+      if (!blockMeshes.length) return null
+      camera.getWorldDirection(dirV)
+      let best = null, bestD = 3.2
+      for (const bm of blockMeshes) {
+        const to = bm.mesh.position.clone().sub(camera.position); const d = to.length()
+        if (d > bestD) continue
+        if (to.normalize().dot(dirV) < 0.55) continue
+        const [ix, iz] = bm.key.split(',').map(Number)
+        best = { ix, iz, d }; bestD = d
+      }
+      return best
+    }
+    const removeBlock = (ix, iz) => {
+      const key = `${ix},${iz}`; const lvl = blockH.get(key) || 0
+      if (lvl <= 0) return
+      const topKey = `${ix},${iz},${lvl - 1}`
+      const idx = blockMeshes.findIndex((b) => b.key === topKey)
+      if (idx >= 0) { scene.remove(blockMeshes[idx].mesh); blockMeshes.splice(idx, 1) }
+      if (lvl - 1 <= 0) blockH.delete(key); else blockH.set(key, lvl - 1)
+      addMaterial(invRef.current, 'dirt', 1); syncInv()
+      poof(new THREE.Vector3(ix + 0.5, lvl - 0.5, iz + 0.5), '#8A5A34', 5)
+    }
+
+    // 🪏 채굴 — 노드 or 설치한 블럭 캐기
     const tryMine = () => {
-      setSwing((s) => s + 1)
+      // 먼저 정면의 설치 블럭을 캐서 되돌려받기
+      const nb = nearestBlock()
       const node = nearestInCone(nodes, 3.0, 0.45)
+      if (nb && (!node || nb.d < node.position.distanceTo(camera.position))) { removeBlock(nb.ix, nb.iz); return }
       if (!node) return
       const nd = node.userData.node
       poof(node.position.clone().add(new THREE.Vector3(0, 0.3, 0)), MATERIALS[nd.drop]?.color || '#caa', 5)
@@ -259,7 +344,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       setTimeout(() => spawn(false, true), 1200)
     }
     const tryNet = () => {
-      setSwing((s) => s + 1)
+      if (!(invRef.current.items.net > 0)) { notify('🥅 먼저 잠자리채를 만들어요! (🧱 조합 · 🪏로 나뭇가지·잎 파밍)'); return }
       const best = nearestInCone(bugs.filter((b) => !b.userData.t.caught), 3.4, 0.5)
       if (!best) return
       const u = best.userData.t
@@ -332,8 +417,50 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       scene.remove(b); bugs.splice(bugs.indexOf(b), 1)
     }
 
+    // 🐛 곤충별 리얼 이동(gait) — 몸 방향을 부드럽게 돌리고, 습성대로 움직인다
+    const turnTo = (b, ang, rate, dt) => {
+      const d = ((ang - b.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI
+      b.rotation.y += d * Math.min(1, rate * dt)
+    }
+    const gaitStep = (b, u, dt, pd, toP) => {
+      const scared = pd < 3.0 && u.shy > 0.05
+      u.wanderCd -= dt
+      if (scared && Math.random() < u.shy * dt * 3.5) { u.dir.copy(toP).setY(0).normalize().multiplyScalar(-1); u.wanderCd = rand(0.6, 1.3) }
+      else if (u.wanderCd <= 0) {
+        const base = Math.atan2(u.dir.x, u.dir.z)
+        const spread = u.gait === 'dart' ? 2.2 : u.gait === 'flutter' ? 1.6 : 1.0
+        const a = base + rand(-spread, spread); u.dir.set(Math.sin(a), 0, Math.cos(a))
+        u.wanderCd = u.gait === 'dart' ? rand(0.5, 1.1) : u.gait === 'scuttle' ? rand(0.4, 1.0) : rand(1.2, 2.8)
+      }
+      let mul = scared ? 1.7 : 1
+      if (u.gait === 'hop') { // 🦗 메뚜기 — 앉았다가 톡톡 튀어오름
+        if (u.hopping) {
+          u.hopVy -= 11 * dt; b.position.y += u.hopVy * dt
+          b.position.x += u.dir.x * u.spd * 2.6 * dt; b.position.z += u.dir.z * u.spd * 2.6 * dt
+          if (b.position.y <= 0) { b.position.y = 0; u.hopping = false; u.hopCd = rand(0.5, scared ? 0.6 : 1.6) }
+        } else { u.hopCd -= dt; if (u.hopCd <= 0) { u.hopping = true; u.hopVy = 2.6 + (scared ? 0.7 : 0) } }
+        turnTo(b, Math.atan2(u.dir.x, u.dir.z), 6, dt)
+      } else if (u.baseY > 0) { // 🦋🪰🐝 나는 곤충
+        if (u.gait === 'dart') mul *= 1.5
+        else if (u.gait === 'flutter') { const a = Math.atan2(u.dir.x, u.dir.z) + Math.sin(u.tt * 4) * 0.5; u.dir.set(Math.sin(a), 0, Math.cos(a)); mul *= 0.8 }
+        else mul *= 0.7
+        b.position.x += u.dir.x * u.spd * mul * dt; b.position.z += u.dir.z * u.spd * mul * dt
+        b.position.y = u.baseY + Math.sin(u.tt * (u.gait === 'dart' ? 9 : 4.5)) * (u.gait === 'dart' ? 0.12 : u.gait === 'hover' ? 0.22 : 0.3)
+        turnTo(b, Math.atan2(u.dir.x, u.dir.z), u.gait === 'dart' ? 4 : 3, dt)
+      } else { // 🐜🪲 기어다니는 곤충
+        if (u.gait === 'scuttle') { const a = Math.atan2(u.dir.x, u.dir.z) + Math.sin(u.tt * 6) * 0.15; u.dir.set(Math.sin(a), 0, Math.cos(a)) }
+        else mul *= 0.85
+        b.position.x += u.dir.x * u.spd * mul * dt; b.position.z += u.dir.z * u.spd * mul * dt
+        b.position.y = 0
+        turnTo(b, Math.atan2(u.dir.x, u.dir.z), u.gait === 'scuttle' ? 7 : 4, dt)
+      }
+      const bd = Math.hypot(b.position.x, b.position.z)
+      if (bd > R - 0.5) { u.dir.multiplyScalar(-1); b.position.x += u.dir.x * u.spd * dt * 2; b.position.z += u.dir.z * u.spd * dt * 2 }
+    }
+
     // 도구별 액션 실행
     const useTool = () => {
+      vm.swing()
       switch (toolRef.current) {
         case 'trowel': tryMine(); break
         case 'net': tryNet(); break
@@ -345,11 +472,14 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
 
     api.current.useTool = useTool
     api.current.setTouchFwd = (v) => { move.touchFwd = v }
-    api.current.selectTool = (id) => { toolRef.current = id; setTool(id) }
+    api.current.jump = () => { keys.jump = true }
+    api.current.place = placeBlock
+    api.current.selectTool = (id) => { toolRef.current = id; setTool(id); vm.setTool(id) }
     if (import.meta.env.DEV) window.__hunt = { // 테스트/디버깅용
       use: useTool, tool: (id) => { toolRef.current = id }, look: (d) => { player.yaw += d },
       mine: tryMine, net: tryNet, bomb: throwBomb, dart: fireDart, trap: placeTrap,
-      inv: invRef.current, bugs, nodes, bombs, darts, traps,
+      inv: invRef.current, bugs, nodes, bombs, darts, traps, blocks: blockMeshes,
+      place: placeBlock, jump: () => { keys.jump = true },
       give: (mat, n = 1) => { addMaterial(invRef.current, mat, n); syncInv() }, // 소재 지급(실제 인벤 경로) — 조합 검증용
       soloBig: () => { // 대형 곤충 1마리만 정면에 두고 플레이어를 원점으로 — 헌터 포획 결정적 검증용
         for (const b of [...bugs]) removeBug(b)
@@ -391,8 +521,11 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     const isLocked = () => document.pointerLockElement === canvas
     const onDown = (e) => {
       if (!isLocked() && e.pointerType !== 'touch') { canvas.requestPointerLock?.(); return }
-      if (isLocked()) useTool()
+      if (!isLocked()) return
+      if (e.button === 2) placeBlock()   // 우클릭: 블럭 설치
+      else useTool()                     // 좌클릭: 도구 사용
     }
+    const onCtx = (e) => e.preventDefault() // 우클릭 메뉴 차단
     const onMove = (e) => { if (!isLocked()) return; player.yaw -= e.movementX * 0.0022; player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch - e.movementY * 0.0022)) }
     const onLock = () => setLocked(isLocked())
     const onKey = (e, v) => {
@@ -406,6 +539,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
         case 'Digit3': if (v) api.current.selectTool('bomb'); break
         case 'Digit4': if (v) api.current.selectTool('dart'); break
         case 'Digit5': if (v) api.current.selectTool('trap'); break
+        case 'Space': keys.jump = v; e.preventDefault(); break
         case 'KeyC': if (v) setShowCraft((s) => !s); break
       }
     }
@@ -416,6 +550,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     const tm = (e) => { for (const t of e.changedTouches) { if (t.identifier !== tId) continue; player.yaw -= (t.clientX - tLast.x) * 0.005; player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch - (t.clientY - tLast.y) * 0.005)); tLast = { x: t.clientX, y: t.clientY }; e.preventDefault() } }
     const te = (e) => { for (const t of e.changedTouches) if (t.identifier === tId) { tId = null; tLast = null } }
     canvas.addEventListener('mousedown', onDown)
+    canvas.addEventListener('contextmenu', onCtx)
     document.addEventListener('mousemove', onMove)
     document.addEventListener('pointerlockchange', onLock)
     document.addEventListener('keydown', kd); document.addEventListener('keyup', ku)
@@ -424,12 +559,12 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     canvas.addEventListener('touchend', te)
 
     // 루프
-    let raf, last = perf()
+    let raf, last = perf(), walkPhase = 0
     const fwd = new THREE.Vector3(), right = new THREE.Vector3()
     const up = new THREE.Vector3(0, 1, 0)
     const loop = (now) => {
       const dt = Math.min(0.05, (now - last) / 1000); last = now
-      // 이동
+      // 수평 이동 — 블럭 벽(1칸 초과)은 막고, 1칸까지는 자동으로 오름
       const sp = 4.2 * dt
       fwd.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw))
       right.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw))
@@ -438,11 +573,27 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       if (keys.b) mv.sub(fwd)
       if (keys.l) mv.sub(right)
       if (keys.r) mv.add(right)
-      if (mv.lengthSq() > 0) { mv.normalize(); player.pos.addScaledVector(mv, sp) }
+      const moving = mv.lengthSq() > 0
+      if (moving) {
+        mv.normalize()
+        const canStep = (nx, nz) => (heightAt(nx, nz) - player.y) <= 1.05
+        const nx = player.pos.x + mv.x * sp; if (canStep(nx, player.pos.z)) player.pos.x = nx
+        const nz = player.pos.z + mv.z * sp; if (canStep(player.pos.x, nz)) player.pos.z = nz
+      }
       const pd0 = Math.hypot(player.pos.x, player.pos.z)
       if (pd0 > R) { player.pos.multiplyScalar(R / pd0) }
-      camera.position.set(player.pos.x, eye, player.pos.z)
+      // 수직 물리 — 점프·중력·블럭 위 착지
+      const groundY = heightAt(player.pos.x, player.pos.z)
+      if (keys.jump && player.onGround) { player.vy = 5.6; player.onGround = false; keys.jump = false }
+      player.vy -= 18 * dt
+      player.y += player.vy * dt
+      if (player.y <= groundY) { player.y = groundY; player.vy = 0; player.onGround = true } else player.onGround = false
+      // 카메라 — 눈높이 + 걷기 상하 bob
+      if (moving && player.onGround) walkPhase += dt * 9
+      const bob = Math.sin(walkPhase) * (moving && player.onGround ? 0.045 : 0)
+      camera.position.set(player.pos.x, player.y + eye + bob, player.pos.z)
       camera.rotation.y = player.yaw; camera.rotation.x = player.pitch
+      vm.update(dt, moving && player.onGround)
 
       // 소품 흔들림
       const T = now / 1000
@@ -463,17 +614,9 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
           if (u.crown) u.crown.position.set(b.position.x, b.position.y + 1.15, b.position.z)
           continue
         }
-        u.wanderCd -= dt
         const toP = new THREE.Vector3(player.pos.x - b.position.x, 0, player.pos.z - b.position.z)
         const pd = toP.length()
-        if (pd < 3.2 && Math.random() < u.shy * dt * 3) { u.dir.copy(toP).normalize().multiplyScalar(-1); u.wanderCd = 1.2 }
-        else if (u.wanderCd <= 0) { const a = Math.random() * Math.PI * 2; u.dir.set(Math.cos(a), 0, Math.sin(a)); u.wanderCd = rand(1.5, 3.5) }
-        b.position.x += u.dir.x * u.spd * dt
-        b.position.z += u.dir.z * u.spd * dt
-        const bd = Math.hypot(b.position.x, b.position.z)
-        if (bd > R - 0.5) { u.dir.multiplyScalar(-1); b.position.x += u.dir.x * u.spd * dt * 2; b.position.z += u.dir.z * u.spd * dt * 2 }
-        if (u.dir.lengthSq() > 0) b.rotation.y = Math.atan2(u.dir.x, u.dir.z)
-        if (u.baseY > 0) b.position.y = u.baseY + Math.sin(u.tt * 2.2) * 0.28
+        gaitStep(b, u, dt, pd, toP)
         if (u.crown) u.crown.position.set(b.position.x, b.position.y + 1.15, b.position.z)
 
         // 함정 밟음 판정
@@ -535,7 +678,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
 
     return () => {
       cancelAnimationFrame(raf); window.removeEventListener('resize', onResize)
-      canvas.removeEventListener('mousedown', onDown); document.removeEventListener('mousemove', onMove)
+      canvas.removeEventListener('mousedown', onDown); canvas.removeEventListener('contextmenu', onCtx); document.removeEventListener('mousemove', onMove)
       document.removeEventListener('pointerlockchange', onLock)
       document.removeEventListener('keydown', kd); document.removeEventListener('keyup', ku)
       canvas.removeEventListener('touchstart', ts); canvas.removeEventListener('touchmove', tm); canvas.removeEventListener('touchend', te)
@@ -555,8 +698,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
         <div className="h-2 w-2 rounded-full border border-black/40 bg-white/70" />
       </div>
 
-      {/* 현재 도구 (전경, 휘두르기/사용 모션) */}
-      <div key={swing} className="pointer-events-none absolute bottom-0 right-4 text-7xl md:text-8xl" style={{ transform: 'rotate(-18deg)', filter: 'drop-shadow(0 6px 8px rgba(0,0,0,0.35))', animation: swing ? 'netSwing 0.32s ease-out' : undefined }}>{activeTool?.icon}</div>
+      {/* (1인칭 손+도구는 3D 뷰모델로 표현됨) */}
 
       {/* 상단 HUD — 도감 진행 · 소재 */}
       <div className="absolute left-4 top-4 flex flex-col gap-2">
@@ -579,13 +721,15 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       <div className="absolute left-1/2 bottom-4 z-10 flex -translate-x-1/2 gap-1.5 rounded-2xl bg-black/35 p-1.5 backdrop-blur">
         {TOOLS.map((t, i) => {
           const cnt = t.kind === 'item' ? (items[t.id] || 0) : null
+          const netLocked = t.id === 'net' && !(items.net > 0)
           const on = tool === t.id
           return (
             <button key={t.id} onClick={() => api.current.selectTool?.(t.id)}
-              className={`relative flex h-14 w-14 flex-col items-center justify-center rounded-xl font-pixel text-[10px] leading-tight transition ${on ? 'bg-white text-[#24401a] scale-105 shadow-[0_4px_0_#3f7a2e]' : 'bg-white/15 text-white hover:bg-white/25'}`}>
+              className={`relative flex h-14 w-14 flex-col items-center justify-center rounded-xl font-pixel text-[10px] leading-tight transition ${on ? 'bg-white text-[#24401a] scale-105 shadow-[0_4px_0_#3f7a2e]' : 'bg-white/15 text-white hover:bg-white/25'} ${netLocked ? 'opacity-50' : ''}`}>
               <span className="text-2xl">{t.icon}</span>
               <span className="mt-0.5">{i + 1}</span>
               {cnt !== null && <span className={`absolute -right-1 -top-1 min-w-[18px] rounded-full px-1 text-[10px] font-bold ${cnt > 0 ? 'bg-[#F2C14E] text-[#3a2a08]' : 'bg-black/60 text-white/70'}`}>{cnt}</span>}
+              {netLocked && <span className="absolute -right-1 -top-1 text-xs">🔒</span>}
             </button>
           )
         })}
@@ -594,8 +738,8 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       {/* 시작 안내 */}
       {!locked && !showCraft && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[24%] flex flex-col items-center gap-1 text-center">
-          <p className="rounded-xl bg-black/55 px-5 py-2 font-pixel text-sm text-white backdrop-blur">화면 클릭 → 시작 · WASD 이동 · 1~5 도구 · 클릭 사용 · C 조합</p>
-          <p className="font-sans text-xs text-white/80 drop-shadow">🪏 캐서 파밍 → 🧱 조합 → 💣💉🕳️ 로 대형 곤충 재우고 🥅 채집</p>
+          <p className="rounded-xl bg-black/55 px-5 py-2 font-pixel text-sm text-white backdrop-blur">클릭 → 시작 · WASD 이동 · Space 점프 · 좌클릭 사용 · 우클릭 블럭설치 · C 조합</p>
+          <p className="font-sans text-xs text-white/80 drop-shadow">🪏 모종삽으로 캐서 파밍 → 🧱 잠자리채·폭탄·마취 제작 → 곤충 사냥! (맨손으론 못 잡아요)</p>
         </div>
       )}
 
@@ -607,12 +751,14 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       )}
 
       {/* 모바일 컨트롤 */}
-      <div className="absolute bottom-24 left-6 md:hidden">
+      <div className="absolute bottom-24 left-6 flex flex-col items-center gap-2 md:hidden">
         <button onTouchStart={() => api.current.setTouchFwd?.(true)} onTouchEnd={() => api.current.setTouchFwd?.(false)}
           className="h-20 w-20 rounded-full bg-white/30 font-pixel text-sm text-white backdrop-blur active:bg-white/50">▲<br />앞으로</button>
+        <button onClick={() => api.current.jump?.()} className="h-14 w-20 rounded-full bg-white/25 font-pixel text-xs text-white backdrop-blur active:bg-white/45">⤒ 점프</button>
       </div>
-      <div className="absolute bottom-24 right-6 md:hidden">
+      <div className="absolute bottom-24 right-6 flex flex-col items-center gap-2 md:hidden">
         <button onClick={() => api.current.useTool?.()} className="h-24 w-24 rounded-full bg-[#8FE06B]/80 font-pixel text-base text-[#1e3a14] shadow-lg active:scale-95">{activeTool?.icon}<br />사용</button>
+        <button onClick={() => api.current.place?.()} className="h-14 w-24 rounded-full bg-[#7A5636]/80 font-pixel text-xs text-white shadow active:scale-95">🧱 설치</button>
       </div>
 
       {/* 🧱 조합 패널 */}
