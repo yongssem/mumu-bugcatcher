@@ -34,9 +34,9 @@ export default function Menu({ onOpen }) {
         <Card
           icon="🧰"
           title="곤충월드 채집"
-          desc="🪏 캐서 파밍 → 🧱 폭탄·마취·함정 조합 → 대형 곤충 헌터식 포획"
+          desc="🌿꽃밭·숲·연못 골라 탐험 → 파밍·조합·헌터 포획"
           badge="플레이"
-          onClick={() => onOpen('hunt')}
+          onClick={() => onOpen('worldselect')}
         />
         <Card
           icon="🏡"

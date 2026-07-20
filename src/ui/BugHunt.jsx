@@ -7,34 +7,19 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { ellipsoid, tube, voxMesh, hash3 } from '../game/Vox.js'
 import { makeBug, animateBug } from '../game/BugGen.js'
-import { BUGS, BUG_COUNT } from '../game/bugData.js'
+import { BUGS, BUG_COUNT, RARITY } from '../game/bugData.js'
 import { recordCatch, bugpediaProgress } from '../save/bugpedia.js'
 import { MATERIALS, NODES, RECIPES } from '../game/bugcraft.js'
 import { loadInventory, addMaterial, craftItem, useItem } from '../save/inventory.js'
+import { HABITATS, DEFAULT_HABITAT } from '../game/habitats.js'
 
 const PVOX = 0.22
 const col = (h) => new THREE.Color(h)
 const addV = (parent, shapes, cf, vox = PVOX) => { const m = voxMesh(shapes, cf, vox); if (m) parent.add(m) }
-const R = 10.5 // 채집터 반경 (원형 초원)
-
-// 스폰 곤충 풀 — 지상/공중 섞어서 (id, 크기, 비행높이, 속도, 겁많음, big=대형 미니보스)
-const POOL = [
-  { id: 'ilbonWangGaeMi', s: 1.0, fly: 0, spd: 1.6, shy: 0.6 },
-  { id: 'muDangBeolle', s: 0.9, fly: 0, spd: 1.0, shy: 0.8 },
-  { id: 'byeoMettugi', s: 1.0, fly: 0, spd: 1.4, shy: 1.0 },
-  { id: 'chilSeongMudang', s: 0.8, fly: 0, spd: 0.9, shy: 0.8 },
-  { id: 'gochuJamJari', s: 1.1, fly: 1.8, spd: 2.2, shy: 0.9 },
-  { id: 'hoRangNabi', s: 1.3, fly: 2.2, spd: 1.6, shy: 0.7 },
-  { id: 'kkulBeol', s: 0.8, fly: 1.6, spd: 1.8, shy: 0.5 },
-  { id: 'norangNabi', s: 1.1, fly: 2.0, spd: 1.5, shy: 0.7 },
-  { id: 'dalPaengI', s: 0.9, fly: 0, spd: 0.4, shy: 0.1 },
-  // 👑 대형 미니보스 — 반드시 무력화(폭탄·마취·함정) 후 포획
-  { id: 'jangSuPungDeng', s: 1.6, fly: 0, spd: 1.2, shy: 0.9, big: true },
-  { id: 'wangSamaGwi', s: 1.8, fly: 0, spd: 1.1, shy: 0.6, big: true },
-  { id: 'jangSuMalBeol', s: 1.5, fly: 1.4, spd: 2.0, shy: 0.7, big: true },
-  { id: 'jangSuJamJari', s: 1.6, fly: 2.0, spd: 2.4, shy: 0.9, big: true },
-]
+const R = 10.5 // 채집터 반경 (원형 서식지)
 const MAX_BUGS = 8
+// 희귀도별 스폰 가중 — 흔할수록 자주, 전설은 귀하게 (희귀 곤충)
+const RWEIGHT = { common: 6, uncommon: 3, rare: 1.4, epic: 0.6 }
 
 const TOOLS = [
   { id: 'trowel', name: '모종삽', icon: '🪏', kind: 'mine' },
@@ -44,7 +29,8 @@ const TOOLS = [
   { id: 'trap', name: '함정', icon: '🕳️', kind: 'item' },
 ]
 
-export default function BugHunt({ onHome }) {
+export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
+  const H = HABITATS[habitat] || HABITATS[DEFAULT_HABITAT]
   const mountRef = useRef(null)
   const api = useRef({})
   const invRef = useRef(loadInventory())
@@ -79,16 +65,16 @@ export default function BugHunt({ onHome }) {
     const canvas = renderer.domElement
 
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color('#BFE9FF')
-    scene.fog = new THREE.Fog('#BFE9FF', 14, 40)
+    scene.background = new THREE.Color(H.sky)
+    scene.fog = new THREE.Fog(H.sky, H.fog[0], H.fog[1])
     const camera = new THREE.PerspectiveCamera(66, w / h, 0.05, 100)
     camera.rotation.order = 'YXZ'
-    scene.add(new THREE.HemisphereLight('#ffffff', '#5a7a40', 1.05))
-    const sun = new THREE.DirectionalLight('#fff6d8', 1.15); sun.position.set(6, 12, 5); scene.add(sun)
+    scene.add(new THREE.HemisphereLight(H.hemi[0], H.hemi[1], H.hemi[2]))
+    const sun = new THREE.DirectionalLight(H.sun[0], H.sun[1]); sun.position.set(6, 12, 5); scene.add(sun)
 
-    // 땅 — 잔디 타일
+    // 땅 — 잔디 타일 (서식지 색)
     const tile = new THREE.BoxGeometry(1, 0.5, 1)
-    const gmat = [new THREE.MeshLambertMaterial({ color: 0x6AB150 }), new THREE.MeshLambertMaterial({ color: 0x60A448 })]
+    const gmat = [new THREE.MeshLambertMaterial({ color: new THREE.Color(H.ground[0]) }), new THREE.MeshLambertMaterial({ color: new THREE.Color(H.ground[1]) })]
     const gi = [new THREE.InstancedMesh(tile, gmat[0], 26 * 26), new THREE.InstancedMesh(tile, gmat[1], 26 * 26)]
     const dummy = new THREE.Object3D(); const cnt = [0, 0]
     for (let x = -13; x < 13; x++) for (let z = -13; z < 13; z++) {
@@ -118,12 +104,35 @@ export default function BugHunt({ onHome }) {
       addV(g, [ellipsoid(0, hh + 0.1, 0, 0.55, 0.32, 0.55)], (px, py, pz) => hash3(Math.floor(px * 4 + 9), 0, Math.floor(pz * 4 + 9)) > 0.8 ? col('#F5F0E0') : col('#C8402E'))
       scene.add(g)
     }
-    for (let i = 0; i < 34; i++) {
-      const a = hash3(i, 7, 3) * Math.PI * 2, r = 2 + hash3(i, 3, 9) * (R - 1)
-      grass(Math.cos(a) * r, Math.sin(a) * r, 3 + hash3(i, 4, 2) * 2.4, (hash3(i, 5, 1) - 0.5) * 1.2, (hash3(i, 6, 8) - 0.5) * 1.2, ['#5FA34A', '#66AE4E', '#579B42'][i % 3])
+    // 🌳 큰 나무 (숲) — 가장자리 랜드마크
+    const bigTree = (x, z) => {
+      const g = new THREE.Group(); g.position.set(x, 0, z)
+      addV(g, [tube(0, 0, 0, 0, 5.2, 0, 0.7, 0.5)], () => col('#4A3422'))
+      addV(g, [ellipsoid(0, 5.8, 0, 2.4, 1.8, 2.4), ellipsoid(1.4, 5.2, 0.6, 1.4, 1.2, 1.4)], () => col('#2E4A24'))
+      scene.add(g)
     }
-    for (const [x, z, hh, p] of [[-4, -3, 3.4, '#F5F0F0'], [5, 2, 3.0, '#F49BC1'], [3, -6, 3.8, '#C9A8F0'], [-6, 5, 3.2, '#F2C14E']]) flower(x, z, hh, p)
-    mushroom(-7, 3, 1.5); mushroom(6, -6, 1.2)
+    // 🪷 연잎 (연못) — 물 위 발판 느낌의 납작한 원반
+    const lilyPad = (x, z) => {
+      const g = new THREE.Group(); g.position.set(x, 0.02, z)
+      addV(g, [ellipsoid(0, 0.06, 0, 0.9, 0.05, 0.9)], () => col('#3E8A4A'))
+      scene.add(g)
+    }
+    // 서식지별 소품 배치 (해시로 결정적 배치)
+    const gc = H.grassColors
+    for (let i = 0; i < H.grassN; i++) {
+      const a = hash3(i, 7, 3) * Math.PI * 2, r = 2 + hash3(i, 3, 9) * (R - 1)
+      grass(Math.cos(a) * r, Math.sin(a) * r, 3 + hash3(i, 4, 2) * 2.4, (hash3(i, 5, 1) - 0.5) * 1.2, (hash3(i, 6, 8) - 0.5) * 1.2, gc[i % gc.length])
+    }
+    if (H.flowers) for (let i = 0; i < H.flowers.n; i++) {
+      const a = hash3(i, 11, 5) * Math.PI * 2, r = 3 + hash3(i, 8, 2) * (R - 3.5)
+      flower(Math.cos(a) * r, Math.sin(a) * r, 2.8 + hash3(i, 9, 4) * 1.2, H.flowers.petals[i % H.flowers.petals.length])
+    }
+    for (let i = 0; i < (H.mushroomN || 0); i++) {
+      const a = hash3(i, 13, 7) * Math.PI * 2, r = 3 + hash3(i, 14, 3) * (R - 3.5)
+      mushroom(Math.cos(a) * r, Math.sin(a) * r, 1.2 + hash3(i, 15, 2) * 0.8)
+    }
+    if (H.extra === 'tree') { bigTree(-8, -6); bigTree(7.5, 5) }
+    if (H.extra === 'lily') for (let i = 0; i < 6; i++) { const a = hash3(i, 21, 9) * Math.PI * 2, r = 2 + hash3(i, 22, 4) * (R - 2.5); lilyPad(Math.cos(a) * r, Math.sin(a) * r) }
 
     // 🧱 조합대 (월드 중앙 근처 랜드마크 — 여기서 파밍한 소재로 포획 블럭을 만든다는 상징)
     const bench = new THREE.Group(); bench.position.set(1.6, 0, -1.6)
@@ -156,10 +165,18 @@ export default function BugHunt({ onHome }) {
     }
     for (let i = 0; i < 10; i++) spawnNode()
 
-    // 곤충 스폰
+    // 곤충 스폰 — 서식지 풀에서 희귀도 가중으로 뽑기 (희귀 곤충일수록 드물게)
     const bugs = []
-    const spawn = (edge = false) => {
-      const t = POOL[Math.floor(Math.random() * POOL.length)]
+    const pool = H.pool
+    const pickType = () => {
+      let total = 0
+      const ws = pool.map((t) => { const w = RWEIGHT[BUGS[t.id]?.rarity] || 3; total += w; return w })
+      let r = Math.random() * total
+      for (let i = 0; i < pool.length; i++) { r -= ws[i]; if (r <= 0) return pool[i] }
+      return pool[pool.length - 1]
+    }
+    const spawn = (edge = false, announce = false) => {
+      const t = pickType()
       const m = BUGS[t.id] ? BUGS[t.id].make() : makeBug({ gen: 'beetle', base: '#888', dark: '#333' })
       m.scale.setScalar(t.s)
       const a = Math.random() * Math.PI * 2, r = edge ? R - 0.5 : rand(2, R - 1)
@@ -167,6 +184,9 @@ export default function BugHunt({ onHome }) {
       m.userData.t = { ...t, wanderCd: 0, dir: new THREE.Vector3(), baseY: t.fly, tt: Math.random() * 6, caught: false, state: 'active', stateT: 0, ind: null }
       scene.add(m); bugs.push(m)
       if (t.big) { const s = emojiSprite('👑'); if (s) { s.scale.setScalar(0.5); m.userData.t.crown = s; scene.add(s) } }
+      // ✨ 희귀 곤충 출현 알림 (초기 스폰 제외)
+      const rar = BUGS[t.id]?.rarity
+      if (announce && (rar === 'rare' || rar === 'epic')) notify(`✨ ${rar === 'epic' ? '전설' : '희귀'} 곤충 ${BUGS[t.id].name} 출현!`)
     }
     for (let i = 0; i < MAX_BUGS; i++) spawn()
 
@@ -236,7 +256,7 @@ export default function BugHunt({ onHome }) {
       notify(rec.isNew ? `🎉 ${name} 처음 채집! 도감 해금!` : `🥅 ${name} 채집!`)
       setCaught(bugpediaProgress(BUG_COUNT).caught)
       removeBug(best)
-      setTimeout(spawn, 1200)
+      setTimeout(() => spawn(false, true), 1200)
     }
     const tryNet = () => {
       setSwing((s) => s + 1)
@@ -527,7 +547,7 @@ export default function BugHunt({ onHome }) {
   const activeTool = TOOLS.find((t) => t.id === tool)
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#BFE9FF] select-none">
+    <div className="relative h-full w-full overflow-hidden select-none" style={{ background: H.sky }}>
       <div ref={mountRef} className="absolute inset-0 h-full w-full" />
 
       {/* 조준점 */}
@@ -540,7 +560,7 @@ export default function BugHunt({ onHome }) {
 
       {/* 상단 HUD — 도감 진행 · 소재 */}
       <div className="absolute left-4 top-4 flex flex-col gap-2">
-        <div className="rounded-xl bg-black/40 px-4 py-2 font-pixel text-sm text-white backdrop-blur">🐛 도감 {caught} / {BUG_COUNT}</div>
+        <div className="rounded-xl bg-black/40 px-4 py-2 font-pixel text-sm text-white backdrop-blur">{H.icon} {H.label} · 🐛 {caught}/{BUG_COUNT}</div>
         <div className="flex flex-wrap gap-1.5 max-w-[62vw]">
           {Object.keys(MATERIALS).map((k) => (
             <span key={k} className="rounded-lg bg-black/35 px-2 py-1 font-sans text-xs text-white backdrop-blur" title={MATERIALS[k].name}>

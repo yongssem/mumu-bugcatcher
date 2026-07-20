@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { BUGS, FAMILIES, RARITY, BUG_ORDER, bugsByFamily, BUG_COUNT } from '../game/bugData.js'
 import { loadBugpedia, bugpediaProgress } from '../save/bugpedia.js'
 import BugViewer from './BugViewer.jsx'
+import BugQuiz from './BugQuiz.jsx'
 
 export default function Bugpedia({ onClose }) {
   const caughtMap = useMemo(() => loadBugpedia(), [])
@@ -11,6 +12,7 @@ export default function Bugpedia({ onClose }) {
   const prog = useMemo(() => bugpediaProgress(BUG_COUNT), [])
   const [fam, setFam] = useState('all')
   const [selId, setSel] = useState(BUG_ORDER[0])
+  const [quiz, setQuiz] = useState(false)
 
   const bug = BUGS[selId]
   const isCaught = (id) => (caughtMap[id]?.n || 0) > 0
@@ -29,10 +31,13 @@ export default function Bugpedia({ onClose }) {
             {prog.caught} / {prog.total} 발견 · {prog.pct}%
           </span>
         </div>
-        <button onClick={onClose} className="rounded-lg bg-white/10 px-4 py-1.5 font-pixel text-sm hover:bg-white/20">
-          닫기 ✕
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setQuiz(true)} className="rounded-lg bg-[#8FE06B] px-4 py-1.5 font-pixel text-sm text-[#1e3a14] hover:brightness-105">🧠 퀴즈</button>
+          <button onClick={onClose} className="rounded-lg bg-white/10 px-4 py-1.5 font-pixel text-sm hover:bg-white/20">닫기 ✕</button>
+        </div>
       </div>
+
+      {quiz && <BugQuiz onClose={() => setQuiz(false)} />}
 
       {/* 진행 막대 */}
       <div className="h-1.5 w-full bg-black/40">
