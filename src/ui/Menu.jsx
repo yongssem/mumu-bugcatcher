@@ -32,9 +32,9 @@ export default function Menu({ onOpen }) {
           onClick={() => onOpen('pedia')}
         />
         <Card
-          icon="🥅"
+          icon="🧰"
           title="곤충월드 채집"
-          desc="작아져서 곤충 사이로! 걸어다니며 잠자리채로 포획"
+          desc="🪏 캐서 파밍 → 🧱 폭탄·마취·함정 조합 → 대형 곤충 헌터식 포획"
           badge="플레이"
           onClick={() => onOpen('hunt')}
         />
