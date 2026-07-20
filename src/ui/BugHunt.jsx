@@ -14,6 +14,7 @@ import { loadInventory, addMaterial, craftItem, useItem } from '../save/inventor
 import { HABITATS, DEFAULT_HABITAT } from '../game/habitats.js'
 import { BugViewModel } from '../game/BugVM.js'
 import { buildMega } from '../game/megaProps.js'
+import { buildSky, SKY_TYPES } from '../game/skyProps.js'
 
 const PVOX = 0.22
 const col = (h) => new THREE.Color(h)
@@ -174,6 +175,23 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       g.position.y = -box.min.y - sink                  // 최저점을 바닥에 맞추고 살짝 파묻기
       scene.add(g)
     })
+
+    // ☁️ 하늘 거대 실루엣 flyby — 주기적으로 머리 위를 가로지른다 (작아진 스케일감)
+    const skyTint = H.mood === 'night' ? '#C6D2E4' : '#33404E'
+    const flybys = []
+    let flybyCd = 4 + Math.random() * 5 // 첫 등장까지 (rand는 아래에서 정의됨)
+    const spawnFlyby = () => {
+      const type = SKY_TYPES[Math.floor(Math.random() * SKY_TYPES.length)]
+      const g = buildSky(type, skyTint); if (!g) return
+      g.scale.setScalar(3 + Math.random() * 2.5)
+      const ang = Math.random() * Math.PI * 2
+      const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang))
+      const perpAng = ang + Math.PI / 2, off = rand(-8, 8), startDist = 26
+      g.position.set(-dir.x * startDist + Math.cos(perpAng) * off, 13 + Math.random() * 9, -dir.z * startDist + Math.sin(perpAng) * off)
+      g.rotation.y = Math.atan2(dir.x, dir.z)
+      g.userData.fly = { vel: dir.multiplyScalar(rand(3.5, 6)), tt: Math.random() * 6 }
+      scene.add(g); flybys.push(g)
+    }
 
     // 🧱 조합대 (월드 중앙 근처 랜드마크 — 여기서 파밍한 소재로 포획 블럭을 만든다는 상징)
     const bench = new THREE.Group(); bench.position.set(1.6, 0, -1.6)
@@ -492,10 +510,10 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     api.current.place = placeBlock
     api.current.selectTool = (id) => { toolRef.current = id; setTool(id); vm.setTool(id) }
     if (import.meta.env.DEV) window.__hunt = { // 테스트/디버깅용
-      use: useTool, tool: (id) => { toolRef.current = id }, look: (d) => { player.yaw += d },
+      use: useTool, tool: (id) => { toolRef.current = id }, look: (d, p) => { player.yaw += d; if (p != null) player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch + p)) },
       mine: tryMine, net: tryNet, bomb: throwBomb, dart: fireDart, trap: placeTrap,
-      inv: invRef.current, bugs, nodes, bombs, darts, traps, blocks: blockMeshes,
-      place: placeBlock, jump: () => { keys.jump = true },
+      inv: invRef.current, bugs, nodes, bombs, darts, traps, blocks: blockMeshes, flybys,
+      place: placeBlock, jump: () => { keys.jump = true }, flyby: spawnFlyby,
       give: (mat, n = 1) => { addMaterial(invRef.current, mat, n); syncInv() }, // 소재 지급(실제 인벤 경로) — 조합 검증용
       soloBig: () => { // 대형 곤충 1마리만 정면에 두고 플레이어를 원점으로 — 헌터 포획 결정적 검증용
         for (const b of [...bugs]) removeBug(b)
@@ -682,6 +700,18 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
         p.position.addScaledVector(p.userData.v, dt)
         p.scale.multiplyScalar(1 - dt * 2)
         if (p.userData.life <= 0) { scene.remove(p); poofs.splice(i, 1) }
+      }
+
+      // ☁️ 하늘 실루엣 flyby — 스폰·드리프트·소멸
+      flybyCd -= dt
+      if (flybyCd <= 0 && flybys.length < 2) { spawnFlyby(); flybyCd = rand(11, 20) }
+      for (let i = flybys.length - 1; i >= 0; i--) {
+        const g = flybys[i]; const f = g.userData.fly; f.tt += dt
+        g.position.addScaledVector(f.vel, dt)
+        g.position.y += Math.sin(f.tt * 0.8) * dt * 0.5
+        g.rotation.z = Math.sin(f.tt * 0.6) * 0.06
+        if (g.userData.flap) { const a = Math.sin(f.tt * 4) * 0.5; g.userData.flap[0].rotation.x = a; g.userData.flap[1].rotation.x = -a }
+        if (Math.hypot(g.position.x, g.position.z) > 36) { scene.remove(g); flybys.splice(i, 1) }
       }
 
       renderer.render(scene, camera)
