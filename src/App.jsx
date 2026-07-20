@@ -8,6 +8,7 @@ import Bugpedia from './ui/Bugpedia.jsx'
 import Careers from './ui/Careers.jsx'
 import MicroScene from './ui/MicroScene.jsx'
 import BugHunt from './ui/BugHunt.jsx'
+import Home from './ui/Home.jsx'
 import { playBgm } from './game/bgm.js'
 
 export default function App() {
@@ -15,7 +16,7 @@ export default function App() {
 
   // 🎵 BGM — 화면에 맞는 곡 (곤충 오픈월드는 밝은 크리에이터 무드 재사용)
   useEffect(() => {
-    if (screen === 'landing' || screen === 'intro' || screen === 'menu' || screen === 'careers') playBgm('landing')
+    if (screen === 'landing' || screen === 'intro' || screen === 'menu' || screen === 'careers' || screen === 'home') playBgm('landing')
     else if (screen === 'pedia' || screen === 'micro' || screen === 'hunt') playBgm('creator')
   }, [screen])
 
@@ -38,10 +39,11 @@ export default function App() {
 
   if (screen === 'landing') return <Landing onStart={() => setScreen('intro')} />
   if (screen === 'intro') return <Cutscene onDone={() => setScreen('menu')} />
-  if (screen === 'menu') return <Menu onOpen={(k) => setScreen(['pedia', 'careers', 'micro', 'hunt'].includes(k) ? k : 'menu')} />
+  if (screen === 'menu') return <Menu onOpen={(k) => setScreen(['pedia', 'careers', 'micro', 'hunt', 'home'].includes(k) ? k : 'menu')} />
   if (screen === 'pedia') return <Bugpedia onClose={() => setScreen('menu')} />
   if (screen === 'careers') return <Careers onBack={() => setScreen('menu')} />
   if (screen === 'micro') return <MicroScene onBack={() => setScreen('menu')} />
-  if (screen === 'hunt') return <BugHunt onHome={() => setScreen('menu')} />
+  if (screen === 'hunt') return <BugHunt onHome={() => setScreen('home')} />
+  if (screen === 'home') return <Home onHunt={() => setScreen('hunt')} onPedia={() => setScreen('pedia')} onMenu={() => setScreen('menu')} />
   return null
 }

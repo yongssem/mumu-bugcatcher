@@ -39,6 +39,18 @@ export function recordCatch(id) {
   return { id, n: entry.n, isNew }
 }
 
+// 여분 표본 1개 소비(가게 판매용) — n>1 일 때만 감소, 카드는 계속 해금 유지(min 1)
+// 성공하면 남은 마리수 반환, 여분이 없으면 null
+export function spendExtra(id) {
+  const data = loadBugpedia()
+  const entry = data[id]
+  if (!entry || entry.n <= 1) return null
+  entry.n -= 1
+  data[id] = entry
+  saveBugpedia(data)
+  return entry.n
+}
+
 export function isCaught(id, data = null) {
   const d = data || loadBugpedia()
   return (d[id]?.n || 0) > 0

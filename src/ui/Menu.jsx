@@ -22,7 +22,7 @@ export default function Menu({ onOpen }) {
         곤충 도감 <b className="text-white">{prog.caught}</b> / {prog.total} 발견 · {prog.pct}%
       </p>
 
-      <div className="mt-8 grid w-full max-w-3xl gap-4 md:grid-cols-3">
+      <div className="mt-8 grid w-full max-w-5xl gap-4 sm:grid-cols-2 md:grid-cols-4">
         <Card
           icon="📖"
           title="곤충 도감"
@@ -37,6 +37,13 @@ export default function Menu({ onOpen }) {
           desc="🪏 캐서 파밍 → 🧱 폭탄·마취·함정 조합 → 대형 곤충 헌터식 포획"
           badge="플레이"
           onClick={() => onOpen('hunt')}
+        />
+        <Card
+          icon="🏡"
+          title="무무의 집"
+          desc="잡은 곤충을 전시(유튜버)·번식(가게)해서 💰코인을 벌어요"
+          badge="허브"
+          onClick={() => onOpen('home')}
         />
         <Card
           icon="💼"
