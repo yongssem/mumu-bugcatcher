@@ -28,13 +28,13 @@ export class BugViewModel {
       return h
     }
 
-    // 🪏 모종삽 — 자루 + 삽날(스페이드)
+    // 🪏 모종삽 — 짧은 자루 + 작은 삽날 (무기 아님, 땅 파는 작은 도구)
     const trowel = new THREE.Group()
     trowel.add(gripHand())
-    trowel.add(box(0.07, 0.5, 0.09, wood, 0, 0.12, 0))
-    trowel.add(box(0.09, 0.12, 0.09, metal, 0, 0.42, 0))
-    const blade = box(0.22, 0.3, 0.04, metal, 0, 0.62, 0.02); blade.rotation.x = 0.22; trowel.add(blade)
-    trowel.rotation.set(0.5, -0.18, 0.1)
+    trowel.add(box(0.055, 0.32, 0.065, wood, 0, 0.1, 0))    // 짧은 자루
+    trowel.add(box(0.07, 0.07, 0.07, metal, 0, 0.29, 0))    // 목
+    const blade = box(0.15, 0.2, 0.03, metal, 0, 0.41, 0.02); blade.rotation.x = 0.3; trowel.add(blade) // 작은 삽날
+    trowel.rotation.set(0.55, -0.18, 0.1)
 
     // 🥅 잠자리채 — 긴 자루 + 테 + 반투명 그물
     const net = new THREE.Group()
@@ -75,20 +75,29 @@ export class BugViewModel {
     this._swingT = 1; this._bobT = 0
   }
 
-  setTool(id) { for (const k in this.tools) this.tools[k].visible = k === id }
+  setTool(id) { for (const k in this.tools) this.tools[k].visible = k === id; this.cur = id }
   swing() { this._swingT = 0 }
 
   update(dt, moving) {
-    // 휘두르기 — 아래로 찍었다 복귀
     if (this._swingT < 1) this._swingT = Math.min(1, this._swingT + dt / SWING_DUR)
     const s = Math.sin(this._swingT * Math.PI)
-    this.group.rotation.x = -s * 1.0
-    this.group.rotation.y = s * 0.22
-    this.group.position.z = -0.78 - s * 0.18
+    let digY = 0
+    if (this.cur === 'trowel') {
+      // 🪏 땅 파기 모션 — 앞아래로 콱 찍고 살짝 퍼올림 (휘두르는 게 아니라 파는 느낌)
+      this.group.rotation.x = s * 0.85
+      this.group.rotation.y = 0
+      this.group.position.z = -0.78 + s * 0.2
+      digY = -s * 0.2
+    } else {
+      // 그 외 도구 — 아래로 휘두르고 복귀
+      this.group.rotation.x = -s * 1.0
+      this.group.rotation.y = s * 0.22
+      this.group.position.z = -0.78 - s * 0.18
+    }
 
     // 걷기 bob (이동 중 크게, 서 있으면 잔잔한 숨쉬기)
-    this._bobT += dt * (moving ? 9 : 2.2)
-    this.group.position.y = -0.4 + Math.sin(this._bobT) * (moving ? 0.03 : 0.008)
-    this.group.position.x = 0.4 + Math.cos(this._bobT * 0.5) * (moving ? 0.016 : 0)
+    this._bobT += dt * (moving ? 6.5 : 2.2)
+    this.group.position.y = -0.4 + Math.sin(this._bobT) * (moving ? 0.028 : 0.008) + digY
+    this.group.position.x = 0.4 + Math.cos(this._bobT * 0.5) * (moving ? 0.014 : 0)
   }
 }

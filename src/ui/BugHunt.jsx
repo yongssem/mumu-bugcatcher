@@ -88,7 +88,25 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     }
     gi.forEach((m, i) => { m.count = cnt[i]; m.instanceMatrix.needsUpdate = true; scene.add(m) })
 
-    // 소품 (거대 풀·꽃·버섯)
+    // ── 배치·충돌 시스템 (요소끼리 안 겹치게 · 일부는 플레이어를 막는 벽=미로) ──
+    const rand = (a, b) => a + Math.random() * (b - a)
+    const occ = []     // 비겹침 점유 { x, z, r }
+    const solids = []  // 플레이어를 막는 원형 장애물 { x, z, r }
+    occ.push({ x: 0, z: 0, r: 2.2 })       // 스폰 지점은 비워둠
+    occ.push({ x: 1.6, z: -1.6, r: 1.1 })  // 조합대 자리
+    const findSpot = (foot, minR, maxR, tries = 28) => {
+      for (let t = 0; t < tries; t++) {
+        const a = Math.random() * Math.PI * 2, r = minR + Math.random() * (maxR - minR)
+        const x = Math.cos(a) * r, z = Math.sin(a) * r
+        let ok = true
+        for (const o of occ) { const dx = x - o.x, dz = z - o.z, rr = foot + o.r; if (dx * dx + dz * dz < rr * rr) { ok = false; break } }
+        if (ok) { const e = { x, z, r: foot }; occ.push(e); return e }
+      }
+      return null
+    }
+    const blockedBySolid = (x, z) => { for (const s of solids) { const dx = x - s.x, dz = z - s.z; if (dx * dx + dz * dz < s.r * s.r) return true } return false }
+
+    // 소품 빌더
     const swayers = []
     const grass = (x, z, hh, bx, bz, c) => {
       const g = new THREE.Group(); g.position.set(x, 0, z)
@@ -121,24 +139,9 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       addV(g, [ellipsoid(0, 0.06, 0, 0.9, 0.05, 0.9)], () => col('#3E8A4A'))
       scene.add(g)
     }
-    // 서식지별 소품 배치 (해시로 결정적 배치)
     const gc = H.grassColors
-    for (let i = 0; i < H.grassN; i++) {
-      const a = hash3(i, 7, 3) * Math.PI * 2, r = 2 + hash3(i, 3, 9) * (R - 1)
-      grass(Math.cos(a) * r, Math.sin(a) * r, 3 + hash3(i, 4, 2) * 2.4, (hash3(i, 5, 1) - 0.5) * 1.2, (hash3(i, 6, 8) - 0.5) * 1.2, gc[i % gc.length])
-    }
-    if (H.flowers) for (let i = 0; i < H.flowers.n; i++) {
-      const a = hash3(i, 11, 5) * Math.PI * 2, r = 3 + hash3(i, 8, 2) * (R - 3.5)
-      flower(Math.cos(a) * r, Math.sin(a) * r, 2.8 + hash3(i, 9, 4) * 1.2, H.flowers.petals[i % H.flowers.petals.length])
-    }
-    for (let i = 0; i < (H.mushroomN || 0); i++) {
-      const a = hash3(i, 13, 7) * Math.PI * 2, r = 3 + hash3(i, 14, 3) * (R - 3.5)
-      mushroom(Math.cos(a) * r, Math.sin(a) * r, 1.2 + hash3(i, 15, 2) * 0.8)
-    }
-    if (H.extra === 'tree') { bigTree(-8, -6); bigTree(7.5, 5) }
-    if (H.extra === 'lily') for (let i = 0; i < 6; i++) { const a = hash3(i, 21, 9) * Math.PI * 2, r = 2 + hash3(i, 22, 4) * (R - 2.5); lilyPad(Math.cos(a) * r, Math.sin(a) * r) }
 
-    // 🌿 빽빽한 풀숲 클러터 — 짧은 풀 다발·덤불·바위 (곤충이 사는 느낌)
+    // 🌿 풀숲 클러터 빌더 — 짧은 풀 다발·덤불·바위·키큰풀 벽(미로)
     const tuft = (x, z, seed) => {
       const g = new THREE.Group(); g.position.set(x, 0, z)
       const c = gc[Math.floor(hash3(seed, 1, 2) * gc.length) % gc.length]
@@ -154,27 +157,68 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     }
     const rock = (x, z) => {
       const g = new THREE.Group(); g.position.set(x, 0, z)
-      addV(g, [ellipsoid(0, 0.22, 0, 0.46, 0.3, 0.42), ellipsoid(0.28, 0.14, 0.1, 0.24, 0.18, 0.22)], (px, py) => col(py > 0.28 ? '#9AA0A6' : '#787E84'))
+      addV(g, [ellipsoid(0, 0.32, 0, 0.62, 0.46, 0.58), ellipsoid(0.36, 0.2, 0.14, 0.32, 0.24, 0.3)], (px, py) => col(py > 0.38 ? '#9AA0A6' : '#787E84'))
       scene.add(g)
     }
-    for (let i = 0; i < 84; i++) { const a = hash3(i, 31, 5) * Math.PI * 2, r = 1.6 + hash3(i, 32, 7) * (R - 1.8); tuft(Math.cos(a) * r, Math.sin(a) * r, i) }
-    for (let i = 0; i < 11; i++) { const a = hash3(i, 41, 3) * Math.PI * 2, r = 3 + hash3(i, 42, 8) * (R - 4.5); bush(Math.cos(a) * r, Math.sin(a) * r, i) }
-    for (let i = 0; i < 6; i++) { const a = hash3(i, 51, 9) * Math.PI * 2, r = 3 + hash3(i, 52, 2) * (R - 4.5); rock(Math.cos(a) * r, Math.sin(a) * r) }
+    const hedge = (x, z, seed) => {  // 키 큰 풀 벽 — 미로(플레이어를 막음)
+      const g = new THREE.Group(); g.position.set(x, 0, z)
+      const blades = []
+      for (let i = 0; i < 9; i++) { const a = hash3(seed, i, 3) * Math.PI * 2, rr = hash3(seed, i, 8) * 0.85, hh = 2.6 + hash3(seed, i, 5) * 1.9; blades.push(tube(Math.cos(a) * rr, 0, Math.sin(a) * rr, Math.cos(a) * rr * 1.1, hh, Math.sin(a) * rr * 1.1, 0.15, 0.03)) }
+      addV(g, blades, (px, py) => col(py > 1.4 ? '#4E8A3A' : gc[0]))
+      g.userData = { sway: 0.04, phase: hash3(seed, 6, 2) * 6 }; scene.add(g); swayers.push(g)
+    }
 
-    // 🪀 거대 인간세계 랜드마크 — 경계 밖에 우뚝 세워 '작아져서 뒷마당에 들어온' 스케일감
-    if (H.mega) H.mega.forEach((type, i) => {
+    // ── 배치: 큰 것/벽부터 자리 선점 → 작은 장식이 빈틈 채움 (서로 안 겹침) ──
+    // 🪀 거대 랜드마크 (경계 밖, 서로 안 겹침)
+    if (H.mega) H.mega.forEach((type) => {
       const g = buildMega(type); if (!g) return
-      const a = (i / H.mega.length) * Math.PI * 2 + 0.7
-      const r = R + 1.8
-      g.rotation.y += a + Math.PI + (hash3(i, 61, 3) - 0.5) * 0.6
-      g.scale.setScalar(1.6 + hash3(i, 62, 5) * 0.5)
-      g.position.set(Math.cos(a) * r, 0, Math.sin(a) * r)
-      g.updateMatrixWorld(true)
-      const box = new THREE.Box3().setFromObject(g)     // 자동으로 바닥에 앉히기
+      let spot = null
+      for (let t = 0; t < 22 && !spot; t++) {
+        const a = Math.random() * Math.PI * 2, r = R + rand(1.2, 3.4), x = Math.cos(a) * r, z = Math.sin(a) * r
+        let ok = true; for (const o of occ) { const dx = x - o.x, dz = z - o.z, rr = 3.6 + o.r; if (dx * dx + dz * dz < rr * rr) { ok = false; break } }
+        if (ok) { occ.push({ x, z, r: 3.6 }); spot = { x, z } }
+      }
+      if (!spot) return
+      g.rotation.y += Math.random() * Math.PI * 2
+      g.scale.setScalar(1.6 + Math.random() * 0.5)
+      g.position.set(spot.x, 0, spot.z); g.updateMatrixWorld(true)
+      const box = new THREE.Box3().setFromObject(g)
       const sink = ['baseball', 'marble', 'gumball', 'dice', 'acorn'].includes(type) ? 0.7 : 0.15
-      g.position.y = -box.min.y - sink                  // 최저점을 바닥에 맞추고 살짝 파묻기
-      scene.add(g)
+      g.position.y = -box.min.y - sink; scene.add(g)
     })
+    // 🌳 나무·바위·키큰풀 벽·덤불 — 플레이어를 막음(미로처럼 사이를 헤집고 다님)
+    if (H.extra === 'tree') for (const [tx, tz] of [[-8, -6], [7.5, 5]]) { occ.push({ x: tx, z: tz, r: 2.6 }); solids.push({ x: tx, z: tz, r: 1.5 }); bigTree(tx, tz) }
+    for (let i = 0; i < 6; i++) { const s = findSpot(1.1, 3, R - 1.5); if (s) { solids.push({ x: s.x, z: s.z, r: 0.95 }); rock(s.x, s.z) } }
+    for (let i = 0; i < 14; i++) { const s = findSpot(1.45, 2.6, R - 1.4); if (s) { solids.push({ x: s.x, z: s.z, r: 1.15 }); hedge(s.x, s.z, i) } }
+    for (let i = 0; i < 11; i++) { const s = findSpot(0.95, 3, R - 2); if (s) { solids.push({ x: s.x, z: s.z, r: 0.8 }); bush(s.x, s.z, i) } }
+    // 🍄버섯·🌸꽃·🪷연잎 (장식, 안 막음)
+    for (let i = 0; i < (H.mushroomN || 0); i++) { const s = findSpot(0.85, 3, R - 3.5); if (s) mushroom(s.x, s.z, 1.2 + Math.random() * 0.8) }
+    if (H.flowers) for (let i = 0; i < H.flowers.n; i++) { const s = findSpot(0.7, 3, R - 3.5); if (s) flower(s.x, s.z, 2.8 + Math.random() * 1.2, H.flowers.petals[i % H.flowers.petals.length]) }
+    if (H.extra === 'lily') for (let i = 0; i < 6; i++) { const s = findSpot(1.0, 2, R - 2.5); if (s) lilyPad(s.x, s.z) }
+
+    // 🪏 채굴 노드 — 파밍 자원(눈에 잘 띄게 소재 아이콘이 위에 둥실). 벽/장식 사이 빈 곳에.
+    const nodes = []
+    const nodeTypes = Object.keys(NODES)
+    const makeNode = (type, e) => {
+      const spec = NODES[type], x = e.x, z = e.z
+      const g = new THREE.Group(); g.position.set(x, 0, z)
+      addV(g, [ellipsoid(0, 0.26, 0, 0.46, 0.3, 0.46)], (px, py) => (py > 0.3 ? col(spec.top) : col(spec.color)))
+      if (type === 'flowerBud') addV(g, [ellipsoid(0, 0.56, 0, 0.24, 0.22, 0.24)], () => col(spec.top))
+      if (type === 'dewDrop') addV(g, [ellipsoid(0, 0.5, 0, 0.22, 0.28, 0.22)], () => col(spec.top))
+      if (type === 'twigPile') addV(g, [tube(-0.22, 0.2, 0, 0.26, 0.54, 0.1, 0.05, 0.04), tube(0.12, 0.2, -0.16, -0.16, 0.5, 0.15, 0.05, 0.04)], () => col(spec.top))
+      const M = MATERIALS[spec.drop]; const icon = emojiSprite(M?.icon || '❓')
+      if (icon) { icon.scale.setScalar(0.62); icon.position.set(x, 1.0, z); scene.add(icon); g.userData.icon = icon }
+      g.userData.node = { type, drop: spec.drop, hitsLeft: spec.hits, color: spec.color }
+      g.userData.bobPhase = Math.random() * 6; g.userData.occSpot = e
+      scene.add(g); nodes.push(g)
+      return g
+    }
+    const spawnNode = () => { const e = findSpot(0.75, 2.5, R - 1.4); if (e) makeNode(nodeTypes[Math.floor(Math.random() * nodeTypes.length)], e) }
+    for (let i = 0; i < 10; i++) spawnNode()
+
+    // 🌿 키 큰 풀 · 짧은 풀 다발 (빽빽하게, 빈틈을 채움 — 곤충이 사는 밀림)
+    for (let i = 0; i < H.grassN + 6; i++) { const s = findSpot(0.5, 2, R - 1); if (s) grass(s.x, s.z, 3 + Math.random() * 2.4, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 1.2, gc[i % gc.length]) }
+    for (let i = 0; i < 64; i++) { const s = findSpot(0.42, 1.6, R - 1); if (s) tuft(s.x, s.z, i) }
 
     // ☁️ 하늘 거대 실루엣 flyby — 주기적으로 머리 위를 가로지른다 (작아진 스케일감)
     const skyTint = H.mood === 'night' ? '#C6D2E4' : '#33404E'
@@ -199,30 +243,6 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     addV(bench, [ellipsoid(0, 0.78, 0, 0.5, 0.14, 0.5)], () => col('#9A6E42'))
     addV(bench, [boxTop(0, 0.92, 0)], () => col('#B8894E'))
     scene.add(bench)
-
-    const rand = (a, b) => a + Math.random() * (b - a)
-
-    // 🪏 채굴 노드 — 곤충월드 블럭. 모종삽으로 캐면 소재가 나온다.
-    const nodes = []
-    const nodeTypes = Object.keys(NODES)
-    const makeNode = (type, x, z) => {
-      const spec = NODES[type]
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      // 뭉툭한 흙덩이 느낌 — 아래 큰 덩이 + 위 밝은 톱
-      addV(g, [ellipsoid(0, 0.24, 0, 0.42, 0.26, 0.42)], (px, py) => (py > 0.28 ? col(spec.top) : col(spec.color)))
-      if (type === 'flowerBud') addV(g, [ellipsoid(0, 0.5, 0, 0.22, 0.2, 0.22)], () => col(spec.top))
-      if (type === 'dewDrop') addV(g, [ellipsoid(0, 0.44, 0, 0.2, 0.26, 0.2)], () => col(spec.top))
-      if (type === 'twigPile') addV(g, [tube(-0.2, 0.2, 0, 0.24, 0.5, 0.1, 0.05, 0.04), tube(0.1, 0.2, -0.15, -0.15, 0.46, 0.14, 0.05, 0.04)], () => col(spec.top))
-      g.userData.node = { type, drop: spec.drop, hitsLeft: spec.hits, color: spec.color }
-      scene.add(g); nodes.push(g)
-      return g
-    }
-    const spawnNode = (edge = false) => {
-      const type = nodeTypes[Math.floor(Math.random() * nodeTypes.length)]
-      const a = Math.random() * Math.PI * 2, r = edge ? R - 1 : rand(2.5, R - 1)
-      makeNode(type, Math.cos(a) * r, Math.sin(a) * r)
-    }
-    for (let i = 0; i < 10; i++) spawnNode()
 
     // 곤충 스폰 — 서식지 풀에서 희귀도 가중으로 뽑기 (희귀 곤충일수록 드물게)
     const bugs = []
@@ -358,10 +378,12 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
         addMaterial(invRef.current, nd.drop, 1); syncInv()
         const M = MATERIALS[nd.drop]
         notify(`${M?.icon || '🎁'} ${M?.name || nd.drop} +1`)
+        if (node.userData.icon) scene.remove(node.userData.icon)
+        if (node.userData.occSpot) { const oi = occ.indexOf(node.userData.occSpot); if (oi >= 0) occ.splice(oi, 1) }
         scene.remove(node); nodes.splice(nodes.indexOf(node), 1)
-        setTimeout(() => spawnNode(true), 9000)
+        setTimeout(spawnNode, 9000)
       } else {
-        node.position.y = -0.06; node.userData.bounce = 0.14 // 살짝 눌리는 피드백
+        node.userData.bounce = 0.16 // 캐는 피드백(살짝 눌림)
       }
     }
 
@@ -517,7 +539,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       give: (mat, n = 1) => { addMaterial(invRef.current, mat, n); syncInv() }, // 소재 지급(실제 인벤 경로) — 조합 검증용
       soloBig: () => { // 대형 곤충 1마리만 정면에 두고 플레이어를 원점으로 — 헌터 포획 결정적 검증용
         for (const b of [...bugs]) removeBug(b)
-        const t = POOL.find((p) => p.big)
+        const t = pool.find((p) => p.big) || pool[0]
         const m = BUGS[t.id].make(); m.scale.setScalar(t.s); m.position.set(0, 0, -2.6)
         m.userData.t = { ...t, spd: 0, wanderCd: 1e9, dir: new THREE.Vector3(), baseY: 0, tt: 0, caught: false, state: 'active', stateT: 0, ind: null }
         scene.add(m); bugs.push(m)
@@ -598,8 +620,8 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
     const up = new THREE.Vector3(0, 1, 0)
     const loop = (now) => {
       const dt = Math.min(0.05, (now - last) / 1000); last = now
-      // 수평 이동 — 블럭 벽(1칸 초과)은 막고, 1칸까지는 자동으로 오름
-      const sp = 4.2 * dt
+      // 수평 이동 — 블럭 벽/장애물(바위·덤불·키큰풀 벽)을 막고, 1칸 블럭까진 자동으로 오름
+      const sp = 2.5 * dt
       fwd.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw))
       right.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw))
       const mv = new THREE.Vector3()
@@ -610,7 +632,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       const moving = mv.lengthSq() > 0
       if (moving) {
         mv.normalize()
-        const canStep = (nx, nz) => (heightAt(nx, nz) - player.y) <= 1.05
+        const canStep = (nx, nz) => (heightAt(nx, nz) - player.y) <= 1.05 && !blockedBySolid(nx, nz)
         const nx = player.pos.x + mv.x * sp; if (canStep(nx, player.pos.z)) player.pos.x = nx
         const nz = player.pos.z + mv.z * sp; if (canStep(player.pos.x, nz)) player.pos.z = nz
       }
@@ -623,7 +645,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       player.y += player.vy * dt
       if (player.y <= groundY) { player.y = groundY; player.vy = 0; player.onGround = true } else player.onGround = false
       // 카메라 — 눈높이 + 걷기 상하 bob
-      if (moving && player.onGround) walkPhase += dt * 9
+      if (moving && player.onGround) walkPhase += dt * 6
       const bob = Math.sin(walkPhase) * (moving && player.onGround ? 0.045 : 0)
       camera.position.set(player.pos.x, player.y + eye + bob, player.pos.z)
       camera.rotation.y = player.yaw; camera.rotation.x = player.pitch
@@ -633,8 +655,13 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       const T = now / 1000
       for (const s of swayers) s.rotation.z = Math.sin(T * 1.3 + s.userData.phase) * s.userData.sway
 
-      // 채굴 노드 눌림 복원
-      for (const n of nodes) { if (n.userData.bounce) { n.position.y = Math.min(0, n.position.y + dt * 0.8); n.userData.bounce -= dt; if (n.userData.bounce <= 0) { n.userData.bounce = 0; n.position.y = 0 } } }
+      // 채굴 노드 — 잘 보이게 살짝 둥실 + 캐면 눌림 피드백, 소재 아이콘도 따라 뜸
+      for (const n of nodes) {
+        const bob = Math.sin(T * 2 + (n.userData.bobPhase || 0)) * 0.07
+        n.position.y = n.userData.bounce ? -0.1 : bob
+        if (n.userData.bounce) { n.userData.bounce -= dt; if (n.userData.bounce <= 0) n.userData.bounce = 0 }
+        if (n.userData.icon) n.userData.icon.position.y = n.position.y + 1.0 + bob * 0.4
+      }
 
       // 곤충 AI + 상태
       for (const b of bugs) {
