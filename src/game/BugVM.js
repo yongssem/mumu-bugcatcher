@@ -24,7 +24,8 @@ export class BugViewModel {
 
     const gripHand = () => {
       const h = makeHand(skin, { grip: true }); h.scale.setScalar(0.72)
-      h.userData.forearm.rotation.z = 0.5; h.userData.forearm.rotation.x = 0.3
+      h.rotation.y = Math.PI // 손을 180° 돌려 앞(북쪽)을 향하게 — 손등이 앞으로
+      h.userData.forearm.rotation.z = -0.5; h.userData.forearm.rotation.x = 0.3 // 팔뚝은 여전히 오른쪽 아래로
       return h
     }
 

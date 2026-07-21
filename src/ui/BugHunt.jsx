@@ -596,7 +596,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
         case 'Digit4': if (v) api.current.selectTool('dart'); break
         case 'Digit5': if (v) api.current.selectTool('trap'); break
         case 'Space': keys.jump = v; e.preventDefault(); break
-        case 'KeyC': if (v) setShowCraft((s) => !s); break
+        case 'KeyC': case 'KeyE': if (v) { document.exitPointerLock?.(); setShowCraft((s) => !s); e.preventDefault() } break // 조합 열기(포인터 잠금 해제 → 클릭 가능)
       }
     }
     const kd = (e) => onKey(e, true), ku = (e) => onKey(e, false)
@@ -625,10 +625,11 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       fwd.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw))
       right.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw))
       const mv = new THREE.Vector3()
-      if (keys.f || move.touchFwd) mv.add(fwd)
-      if (keys.b) mv.sub(fwd)
-      if (keys.l) mv.sub(right)
-      if (keys.r) mv.add(right)
+      const kb = isLocked() // 조합 패널 등으로 잠금 해제 시 키보드 이동 정지(모바일 터치는 유지)
+      if ((keys.f && kb) || move.touchFwd) mv.add(fwd)
+      if (keys.b && kb) mv.sub(fwd)
+      if (keys.l && kb) mv.sub(right)
+      if (keys.r && kb) mv.add(right)
       const moving = mv.lengthSq() > 0
       if (moving) {
         mv.normalize()
@@ -811,7 +812,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       {/* 시작 안내 */}
       {!locked && !showCraft && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[24%] flex flex-col items-center gap-1 text-center">
-          <p className="rounded-xl bg-black/55 px-5 py-2 font-pixel text-sm text-white backdrop-blur">클릭 → 시작 · WASD 이동 · Space 점프 · 좌클릭 사용 · 우클릭 블럭설치 · C 조합</p>
+          <p className="rounded-xl bg-black/55 px-5 py-2 font-pixel text-sm text-white backdrop-blur">클릭 → 시작 · WASD 이동 · Space 점프 · 좌클릭 사용 · 우클릭 블럭설치 · C/E 조합</p>
           <p className="font-sans text-xs text-white/80 drop-shadow">🪏 모종삽으로 캐서 파밍 → 🧱 잠자리채·폭탄·마취 제작 → 곤충 사냥! (맨손으론 못 잡아요)</p>
         </div>
       )}
