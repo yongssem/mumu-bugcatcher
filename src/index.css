@@ -30,6 +30,17 @@ body,
   font-family: 'Pretendard', sans-serif;
 }
 
+/* 작은 가로 화면에서도 조합 설명을 읽을 수 있도록 최소 글자 크기를 보장한다. */
+.hunt-craft { font-size: 14px; }
+.hunt-craft h2 { font-size: 18px; }
+.hunt-craft h3 { font-size: 14px; }
+.hunt-craft p { font-size: 12px; }
+.hunt-craft span:not(.text-4xl) { font-size: 11px; }
+.hunt-craft button { font-size: 13px; min-height: 36px; }
+.hunt-craft .text-4xl { font-size: 30px; }
+
+button:focus-visible { outline: 3px solid #F2C14E; outline-offset: 3px; }
+
 /* 피격 시 화면 가장자리 붉은 플래시 (부드럽게, 무섭지 않게) */
 @keyframes damage-flash {
   0% { opacity: 0.55; }

@@ -8,6 +8,7 @@ export const VOX = 0.18 // 복셀 한 칸(모델 단위) — 작을수록 고해
 // 공용 재질 + 공용 큐브 지오메트리 (인스턴싱으로 수천 복셀도 1 드로우콜)
 export const VOX_MAT = new THREE.MeshLambertMaterial({ color: 0xffffff })
 const CUBE = new THREE.BoxGeometry(1, 1, 1)
+export const VOX_GEOMETRY = CUBE
 
 // ---------- 암시적 도형 (inside 함수 + .bb 경계상자) ----------
 export function ellipsoid(cx, cy, cz, rx, ry, rz) {

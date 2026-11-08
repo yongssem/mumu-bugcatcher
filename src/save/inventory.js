@@ -3,16 +3,15 @@
 // 도감(bugpedia)과 분리 — 파밍/제작의 성취를 세션 간에도 유지한다.
 
 export const INVENTORY_KEY = 'mumubug:inventory:v1'
+import { readJSON, writeJSON, removeJSON, counts, count, safeKey } from './safeStorage.js'
 
 const empty = () => ({ mats: {}, items: {} })
 
 export function loadInventory() {
   try {
-    const raw = localStorage.getItem(INVENTORY_KEY)
-    if (!raw) return empty()
-    const d = JSON.parse(raw)
+    const d = readJSON(INVENTORY_KEY, null)
     if (!d || typeof d !== 'object') return empty()
-    return { mats: d.mats && typeof d.mats === 'object' ? d.mats : {}, items: d.items && typeof d.items === 'object' ? d.items : {} }
+    return { mats: counts(d.mats), items: counts(d.items) }
   } catch {
     return empty()
   }
@@ -20,26 +19,27 @@ export function loadInventory() {
 
 export function saveInventory(inv) {
   try {
-    localStorage.setItem(INVENTORY_KEY, JSON.stringify({ mats: inv.mats || {}, items: inv.items || {} }))
-    return true
+    return writeJSON(INVENTORY_KEY, { mats: counts(inv.mats), items: counts(inv.items) })
   } catch {
     return false
   }
 }
 
 export function clearInventory() {
-  localStorage.removeItem(INVENTORY_KEY)
+  removeJSON(INVENTORY_KEY)
 }
 
 // 소재 n개 추가 → 갱신된 인벤토리 반환
 export function addMaterial(inv, mat, n = 1) {
-  inv.mats[mat] = (inv.mats[mat] || 0) + n
+  if (!safeKey(mat) || !Number.isSafeInteger(n)) return inv
+  inv.mats[mat] = Math.max(0, count(inv.mats[mat]) + n)
   saveInventory(inv)
   return inv
 }
 
 // 레시피 제작: 소재 차감 + 아이템 +1 (소재 부족이면 false)
 export function craftItem(inv, recipe) {
+  if (recipe.mode === 'tool' && inv.items[recipe.id] > 0) return false
   for (const [m, n] of Object.entries(recipe.cost)) {
     if ((inv.mats[m] || 0) < n) return false
   }

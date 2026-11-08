@@ -34,7 +34,7 @@ export default function Home({ onHunt, onPedia, onMenu }) {
     () => BUG_ORDER.filter((id) => (pedia[id]?.n || 0) > 0).map((id) => ({ id, n: pedia[id].n })),
     [pedia]
   )
-  const displayFeatured = featured || home.display.find(Boolean) || (caught[0]?.id ?? null)
+  const displayFeatured = [featured, ...home.display, caught[0]?.id].find(id => BUGS[id]) || null
 
   // ── 전시장 ──
   const fillSlot = (slot, id) => { setDisplay(homeRef.current, slot, id); sync(); setFeatured(id); setPicker(null) }

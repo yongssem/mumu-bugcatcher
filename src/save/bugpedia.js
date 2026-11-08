@@ -3,13 +3,12 @@
 // 처음 잡으면 도감 카드가 실루엣 → 컬러로 해금되고 진짜 곤충 지식이 열린다.
 
 export const BUGPEDIA_KEY = 'mumubug:bugpedia:v1'
+import { readJSON, writeJSON, removeJSON, isRecord, safeKey } from './safeStorage.js'
 
 export function loadBugpedia() {
   try {
-    const raw = localStorage.getItem(BUGPEDIA_KEY)
-    if (!raw) return {}
-    const data = JSON.parse(raw)
-    return data && typeof data === 'object' ? data : {}
+    const data = readJSON(BUGPEDIA_KEY, {})
+    return Object.fromEntries(Object.entries(isRecord(data) ? data : {}).filter(([id, e]) => safeKey(id) && isRecord(e) && Number.isSafeInteger(e.n) && e.n > 0))
   } catch {
     return {}
   }
@@ -17,19 +16,19 @@ export function loadBugpedia() {
 
 export function saveBugpedia(data) {
   try {
-    localStorage.setItem(BUGPEDIA_KEY, JSON.stringify(data))
-    return true
+    return writeJSON(BUGPEDIA_KEY, data)
   } catch {
     return false
   }
 }
 
 export function clearBugpedia() {
-  localStorage.removeItem(BUGPEDIA_KEY)
+  removeJSON(BUGPEDIA_KEY)
 }
 
 // 채집 1회 기록 → { id, n, isNew } 반환 (isNew=처음 발견)
 export function recordCatch(id) {
+  if (!safeKey(id)) return { id, n: 0, isNew: false }
   const data = loadBugpedia()
   const entry = data[id] || { n: 0 }
   const isNew = entry.n === 0

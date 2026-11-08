@@ -4,9 +4,10 @@
 
 const MUTE_KEY = 'mumubug:muted'
 const VOL_KEY = 'mumubug:bgmvol'
+function readSetting(key) { try { return localStorage.getItem(key) } catch { return null } }
 // 저장된 음악 볼륨 (0~1), 없으면 기본 0.35
 let VOLUME = (() => {
-  const v = parseFloat(localStorage.getItem(VOL_KEY))
+  const v = parseFloat(readSetting(VOL_KEY))
   return isNaN(v) ? 0.35 : Math.max(0, Math.min(1, v))
 })()
 
@@ -16,8 +17,8 @@ export function getBgmVolume() {
 
 // 🎵 음악 볼륨 조절 (0~1) — 즉시 반영 + 저장
 export function setBgmVolume(v) {
-  VOLUME = Math.max(0, Math.min(1, v))
-  localStorage.setItem(VOL_KEY, String(VOLUME))
+  VOLUME = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.35
+  try { localStorage.setItem(VOL_KEY, String(VOLUME)) } catch { /* 저장 차단 시 이번 재생에만 반영 */ }
   if (current && !isMuted()) current.volume = VOLUME
 }
 
@@ -36,7 +37,7 @@ let current = null
 let currentName = null
 
 function isMuted() {
-  return localStorage.getItem(MUTE_KEY) === '1'
+  return readSetting(MUTE_KEY) === '1'
 }
 
 export function playBgm(name) {

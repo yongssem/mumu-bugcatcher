@@ -4,6 +4,9 @@
 // 순수 저장/조작만 담당 — 경제 공식(수익·가격)은 game/economy.js 에 분리.
 
 export const HOME_KEY = 'mumubug:home:v1'
+import { readJSON, writeJSON, removeJSON, count } from './safeStorage.js'
+import { BUGS } from '../game/bugData.js'
+const validBug = id => typeof id === 'string' && Object.hasOwn(BUGS, id)
 export const DISPLAY_SLOTS = 6
 
 function empty() {
@@ -12,18 +15,16 @@ function empty() {
 
 export function loadHome() {
   try {
-    const raw = localStorage.getItem(HOME_KEY)
-    if (!raw) return empty()
-    const d = JSON.parse(raw)
+    const d = readJSON(HOME_KEY, null)
     if (!d || typeof d !== 'object') return empty()
     const base = empty()
-    const display = Array.isArray(d.display) ? d.display.slice(0, DISPLAY_SLOTS) : base.display
+    const display = Array.isArray(d.display) ? d.display.slice(0, DISPLAY_SLOTS).map(id => validBug(id) ? id : null) : base.display
     while (display.length < DISPLAY_SLOTS) display.push(null)
     return {
-      coins: Number.isFinite(d.coins) ? d.coins : 0,
+      coins: count(d.coins),
       display,
-      stock: Array.isArray(d.stock) ? d.stock : [],
-      stats: { ...base.stats, ...(d.stats || {}) },
+      stock: Array.isArray(d.stock) ? d.stock.filter(s => s && validBug(s.id) && Number.isSafeInteger(s.price) && s.price >= 0) : [],
+      stats: Object.fromEntries(Object.keys(base.stats).map(k => [k, count(d.stats?.[k])])),
     }
   } catch {
     return empty()
@@ -31,10 +32,10 @@ export function loadHome() {
 }
 
 export function saveHome(h) {
-  try { localStorage.setItem(HOME_KEY, JSON.stringify(h)); return true } catch { return false }
+  return writeJSON(HOME_KEY, h)
 }
 
-export function clearHome() { localStorage.removeItem(HOME_KEY) }
+export function clearHome() { removeJSON(HOME_KEY) }
 
 // 코인 증감 (음수면 차감) — 갱신된 h 반환
 export function addCoins(h, n) {
