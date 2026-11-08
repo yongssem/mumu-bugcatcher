@@ -8,6 +8,7 @@ export class HuntInput {
     listen(this.doc, 'keydown', e => this.key(e, true))
     listen(this.doc, 'keyup', e => this.key(e, false))
     listen(this.win, 'blur', () => this.pause())
+    listen(this.win, 'mumubug:orientationblocked', () => this.pause())
     listen(this.doc, 'visibilitychange', () => { if (this.doc.hidden) this.pause() })
     listen(this.doc, 'pointerlockchange', () => {
       const locked = this.doc.pointerLockElement === canvas

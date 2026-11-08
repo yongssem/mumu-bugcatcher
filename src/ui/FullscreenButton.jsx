@@ -2,6 +2,7 @@
 // 카톡 등 인앱 브라우저는 Fullscreen API를 지원 안 하기도 함 → 버튼은 항상 보이게 하고,
 // 지원 안 하면 "다른 브라우저로 열기" 안내(onHint)로 유도.
 import { useEffect, useState } from 'react'
+import { enterFullscreen } from './mobile/orientation.js'
 
 function fsElement() {
   return document.fullscreenElement || document.webkitFullscreenElement || null
@@ -17,14 +18,13 @@ function fsSupported() {
 }
 
 export function requestFs() {
-  const el = document.documentElement
-  const fn = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen
-  if (fn) fn.call(el)
+  const landscape = new URLSearchParams(window.location.search).get('touch') === '1' || window.matchMedia?.('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0
+  return enterFullscreen({ landscape })
 }
 
 function exitFs() {
   const fn = document.exitFullscreen || document.webkitExitFullscreen
-  if (fn) fn.call(document)
+  if (fn) { try { Promise.resolve(fn.call(document)).catch(() => {}) } catch { /* 미지원 */ } }
 }
 
 // 전체화면 아이콘 (네 모서리) — 이모지는 폰에서 안 뜨는 경우가 많아 SVG로
