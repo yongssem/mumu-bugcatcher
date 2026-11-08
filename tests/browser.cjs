@@ -1,0 +1,315 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs/promises')
+const path = require('node:path')
+const { chromium } = require('playwright')
+const base = process.env.TEST_URL || 'http://127.0.0.1:5175'
+const output = process.env.TEST_OUTPUT_DIR || path.join(__dirname, '..', 'test-results')
+const errors = []
+let browser, count = 0
+async function check(name, fn) { await fn(); console.log(`PASS ${++count}: ${name}`) }
+async function enter(page, query = '') {
+  page.on('pageerror', e => errors.push(e.message))
+  await page.goto(base + query)
+  await page.getByRole('button', { name: /시작하기/ }).click()
+  await page.getByRole('button', { name: /스킵|건너뛰기/ }).click()
+  await page.getByRole('button', { name: /곤충월드 채집/ }).click()
+  await page.getByRole('button', { name: /꽃밭/ }).click()
+  await page.waitForFunction(() => !!window.__hunt?.engine)
+}
+async function resume(page, touch = false) { await page.getByRole('button', { name: '탐험 계속하기' })[touch ? 'tap' : 'click'](); await page.waitForFunction(() => __hunt.controls.active) }
+async function aimNode(page, drop) {
+  return page.evaluate(drop => {
+    const n = __hunt.nodes.find(n => n.userData.node.drop === drop)
+    if (!n) return false
+    const p = __hunt.player
+    p.pos.set(n.position.x, 0, n.position.z + 1.35); p.y = 0; p.vy = 0; p.yaw = 0
+    p.pitch = Math.atan2(n.position.y + 0.3 - 1.35, 1.35)
+    return true
+  }, drop)
+}
+(async () => {
+  await fs.mkdir(output, { recursive: true })
+  browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' })
+  await check('touch-capable PC still enters mouse look when started with a mouse', async () => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, hasTouch: true })
+    const hybrid = await context.newPage()
+    await enter(hybrid); await resume(hybrid)
+    await hybrid.waitForFunction(() => document.pointerLockElement === document.querySelector('canvas'), null, { timeout: 2000 })
+    const yaw = await hybrid.evaluate(() => __hunt.player.yaw)
+    await hybrid.mouse.move(680, 400)
+    await hybrid.waitForFunction(yaw => __hunt.player.yaw !== yaw, yaw)
+    assert.equal(await hybrid.evaluate(() => __hunt.controls.state.held), false)
+    assert.equal(await hybrid.getByRole('group', { name: '이동 조이스틱' }).count(), 0)
+    await hybrid.keyboard.press('Escape')
+    await resume(hybrid, true)
+    await hybrid.getByRole('group', { name: '이동 조이스틱' }).waitFor()
+    await hybrid.mouse.move(640, 400)
+    await hybrid.mouse.down()
+    await hybrid.waitForTimeout(80)
+    assert.equal(await hybrid.evaluate(() => __hunt.controls.state.held), true, 'old touch controls must not cancel the first held mouse action')
+    await hybrid.mouse.up()
+    assert.equal(await hybrid.evaluate(() => __hunt.controls.state.held), false)
+    await context.close()
+  })
+  await check('denied pointer lock keeps click-free mouse look and hides the canvas cursor', async () => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    await context.addInitScript(() => { Element.prototype.requestPointerLock = () => Promise.reject(new DOMException('blocked', 'NotAllowedError')) })
+    const denied = await context.newPage()
+    await enter(denied); await resume(denied)
+    await denied.mouse.move(640, 400)
+    const yaw = await denied.evaluate(() => __hunt.player.yaw)
+    await denied.mouse.move(700, 420)
+    await denied.waitForFunction(yaw => __hunt.player.yaw !== yaw, yaw, { timeout: 2000 })
+    assert.equal(await denied.evaluate(() => __hunt.controls.state.held), false)
+    assert.equal(await denied.locator('canvas').evaluate(c => getComputedStyle(c).cursor), 'none')
+    await denied.mouse.move(1278, 400)
+    const edgeYaw = await denied.evaluate(() => __hunt.player.yaw)
+    await denied.waitForFunction(before => __hunt.player.yaw < before - Math.PI * 2, edgeYaw, { timeout: 8000 })
+    await denied.mouse.move(2, 400)
+    const reverseYaw = await denied.evaluate(() => __hunt.player.yaw)
+    await denied.waitForFunction(before => __hunt.player.yaw > before + Math.PI * 2, reverseYaw, { timeout: 8000 })
+    assert.equal(await denied.evaluate(() => __hunt.controls.state.held), false)
+    await denied.keyboard.press('Escape')
+    assert.notEqual(await denied.locator('canvas').evaluate(c => getComputedStyle(c).cursor), 'none')
+    await context.close()
+  })
+  const desktop = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  await desktop.addInitScript(() => {
+    const NativeAudio = window.Audio
+    window.__musicInstances = []
+    window.Audio = function(...args) { const audio = new NativeAudio(...args); window.__musicInstances.push(audio); return audio }
+  })
+  const page = await desktop.newPage()
+  await enter(page)
+  await check('new original soundtrack files decode as non-silent stereo loops and exploration music plays', async () => {
+    const tracks = await page.evaluate(async () => {
+      const context = new AudioContext()
+      const tracks = []
+      try {
+        for (const file of ['garden-wakeup.mp3', 'leaf-trails.mp3', 'terrarium-home.mp3']) {
+          const response = await fetch('/bgm/' + file)
+          if (!response.ok) throw new Error(file + ': ' + response.status)
+          const audio = await context.decodeAudioData(await response.arrayBuffer())
+          const samples = audio.getChannelData(0)
+          let peak = 0, sum = 0
+          for (let i = 0; i < samples.length; i++) { peak = Math.max(peak, Math.abs(samples[i])); sum += samples[i] ** 2 }
+          tracks.push({ file, duration: audio.duration, channels: audio.numberOfChannels, peak, rms: Math.sqrt(sum / samples.length), loopStep: Math.abs(samples[0] - samples[samples.length - 1]) })
+        }
+      } finally { await context.close() }
+      return tracks
+    })
+    for (const track of tracks) {
+      assert.equal(track.channels, 2)
+      assert.ok(track.duration > 60 && track.duration < 100)
+      assert.ok(track.peak < 0.99 && track.rms > 0.01)
+      assert.ok(track.loopStep < 0.1)
+    }
+    await page.waitForFunction(() => window.__musicInstances.at(-1)?.src.includes('leaf-trails.mp3') && window.__musicInstances.at(-1).currentTime > 0.2)
+  })
+  await check('all starter materials exist and world waits for deliberate start', async () => {
+    const state = await page.evaluate(() => ({ drops: __hunt.nodes.map(n => n.userData.node.drop), paused: __hunt.engine.paused }))
+    assert.deepEqual([...new Set(state.drops)].sort(), ['dew', 'dirt', 'leaf', 'pollen', 'sap', 'twig'])
+    assert.equal(state.paused, true)
+  })
+  await resume(page)
+  await check('keyboard moves, Escape freezes world and clears held input', async () => {
+    const z = await page.evaluate(() => __hunt.player.pos.z)
+    await page.keyboard.down('KeyW'); await page.waitForTimeout(240)
+    assert.ok(await page.evaluate(z => __hunt.player.pos.z < z - 0.1, z))
+    await page.keyboard.press('Escape'); await page.keyboard.up('KeyW')
+    await page.waitForFunction(() => __hunt.engine.paused)
+    const t = await page.evaluate(() => __hunt.bugs[0].userData.t.tt)
+    await page.waitForTimeout(250)
+    assert.equal(await page.evaluate(() => __hunt.bugs[0].userData.t.tt), t)
+    assert.equal(await page.evaluate(() => __hunt.controls.state.held), false)
+  })
+  await resume(page)
+  await check('holding the shovel mines actual twig and leaf nodes', async () => {
+    await page.mouse.move(640, 400)
+    for (const drop of ['twig', 'leaf']) {
+      for (let i = 0; i < 2; i++) {
+        assert.equal(await aimNode(page, drop), true)
+        await page.waitForTimeout(60)
+        const before = await page.evaluate(d => __hunt.inv.mats[d] || 0, drop)
+        await page.mouse.down()
+        await page.waitForFunction(({ d, before }) => (__hunt.inv.mats[d] || 0) > before, { d: drop, before }, { timeout: 5000 })
+        await page.mouse.up()
+      }
+    }
+  })
+  await check('craft shortcut ignores key repeat, freezes timers, crafts one permanent net', async () => {
+    await page.keyboard.down('KeyC'); await page.keyboard.down('KeyC'); await page.keyboard.up('KeyC')
+    await page.getByRole('dialog', { name: '조합대', exact: true }).waitFor()
+    const t = await page.evaluate(() => __hunt.bugs[0].userData.t.tt)
+    await page.waitForTimeout(180)
+    assert.equal(await page.evaluate(() => __hunt.bugs[0].userData.t.tt), t)
+    await page.getByRole('button', { name: '잠자리채 만들기', exact: true }).click()
+    assert.equal(await page.evaluate(() => __hunt.inv.items.net), 1)
+    assert.equal(await page.getByRole('button', { name: '잠자리채 보유 중' }).isDisabled(), true)
+    await page.screenshot({ path: path.join(output, 'desktop-craft.png') })
+    await page.getByRole('button', { name: '닫기 ✕', exact: true }).click()
+  })
+  await resume(page)
+  await check('large insect requires sedation, then unlocks pedia and persists', async () => {
+    const id = await page.evaluate(() => { __hunt.soloBig(); __hunt.net(); return __hunt.bugs[0].userData.t.id })
+    assert.equal(await page.evaluate(() => __hunt.bugs.length), 1)
+    // 결정적인 배치만 디버그 API로 준비하고, 실제 다트·포획 로직을 실행한다.
+    await page.evaluate(() => { __hunt.inv.items.dart = 1; __hunt.dart() })
+    await page.waitForFunction(() => __hunt.bugs[0]?.userData.t.state === 'asleep')
+    await page.evaluate(() => __hunt.net())
+    assert.ok(await page.evaluate(id => JSON.parse(localStorage.getItem('mumubug:bugpedia:v1'))[id].n >= 1, id))
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog', { name: '채집 준비' }).getByRole('button', { name: '🏡 집으로' }).click()
+    await page.waitForFunction(() => window.__musicInstances.at(-1)?.src.includes('terrarium-home.mp3') && window.__musicInstances.at(-1).currentTime > 0.1)
+    await page.getByRole('button', { name: '📖 도감', exact: true }).click()
+    await page.getByRole('button', { name: '닫기 ✕', exact: true }).click()
+    await page.getByRole('heading', { name: /무무의 집/ }).waitFor()
+    assert.equal(await page.evaluate(() => window.__hunt), undefined)
+  })
+  await check('returning to hunt retains inventory and releases the previous scene', async () => {
+    await page.getByRole('button', { name: '← 메뉴', exact: true }).click()
+    await page.getByRole('button', { name: /곤충 도감/ }).click()
+    await page.getByRole('button', { name: '닫기 ✕', exact: true }).click()
+    await page.getByRole('button', { name: /곤충월드 채집/ }).waitFor({ timeout: 1500 })
+    await page.getByRole('button', { name: /무무의 집/ }).click()
+    await page.getByRole('button', { name: '🥅 채집', exact: true }).click()
+    await page.getByRole('button', { name: /꽃밭/ }).click()
+    await page.waitForFunction(() => !!window.__hunt?.engine)
+    assert.equal(await page.evaluate(() => __hunt.inv.items.net), 1)
+    assert.equal(await page.locator('canvas').count(), 1)
+    await resume(page)
+    await page.keyboard.press('Digit2')
+    assert.equal(await page.getByRole('button', { name: '2 잠자리채', exact: true }).getAttribute('aria-pressed'), 'true')
+    await page.screenshot({ path: path.join(output, 'desktop-hunt.png') })
+  })
+  await check('placed soil survives the round trip without losing inventory', async () => {
+    await page.evaluate(() => {
+      const p = __hunt.player; p.pos.set(0.1, 0, 0.5); p.y = 0; p.yaw = 0; p.pitch = 0
+      __hunt.give('dirt', 2)
+    })
+    await page.waitForTimeout(80)
+    await page.evaluate(() => __hunt.place())
+    assert.equal(await page.evaluate(() => __hunt.blocks.length), 0, 'spawn-safe cells must reject placement before consuming dirt')
+    assert.equal(await page.evaluate(() => __hunt.inv.mats.dirt), 2)
+    await page.evaluate(() => {
+      const p = __hunt.player; p.pos.set(0, 0, 0); p.y = 0; p.yaw = 0; p.pitch = 0
+    })
+    await page.waitForTimeout(350)
+    await page.evaluate(() => __hunt.place())
+    assert.equal(await page.evaluate(() => __hunt.blocks.length), 1)
+    assert.equal(await page.evaluate(() => __hunt.inv.mats.dirt), 1)
+    await page.keyboard.press('Escape')
+    await page.getByRole('dialog', { name: '채집 준비' }).getByRole('button', { name: '🏡 집으로' }).click()
+    await page.getByRole('button', { name: '🥅 채집', exact: true }).click()
+    await page.getByRole('button', { name: /꽃밭/ }).click()
+    await page.waitForFunction(() => !!window.__hunt?.engine)
+    assert.equal(await page.evaluate(() => __hunt.blocks.length), 1)
+    assert.equal(await page.evaluate(() => __hunt.inv.mats.dirt), 1)
+  })
+  const mobileContext = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 })
+  await check('portrait phone blocks the landing page until physically rotated', async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    const portrait = await context.newPage()
+    portrait.on('pageerror', e => errors.push(e.message))
+    await portrait.goto(base)
+    await portrait.getByRole('dialog', { name: '가로 화면 전용' }).waitFor()
+    assert.equal(await portrait.getByRole('button', { name: /시작하기/ }).count(), 0)
+    assert.equal(await portrait.locator('[inert]').count(), 1)
+    await portrait.getByRole('button', { name: '전체화면 · 가로로 보기' }).click()
+    await portrait.setViewportSize({ width: 844, height: 390 })
+    await portrait.getByRole('button', { name: /시작하기/ }).waitFor()
+    assert.equal(await portrait.getByRole('dialog', { name: '가로 화면 전용' }).count(), 0)
+    await context.close()
+  })
+  const mobile = await mobileContext.newPage()
+  await enter(mobile, '?touch=1'); await resume(mobile, true)
+  await check('landscape phone exposes four-direction joystick, look drag and action buttons', async () => {
+    await mobile.getByRole('group', { name: '이동 조이스틱' }).waitFor()
+    await mobile.getByRole('button', { name: '도구 사용', exact: true }).waitFor()
+    const cdp = await mobileContext.newCDPSession(mobile)
+    const box = await mobile.getByRole('group', { name: '이동 조이스틱' }).boundingBox()
+    const x = box.x + box.width / 2, y = box.y + box.height / 2
+    const before = await mobile.evaluate(() => ({ x: __hunt.player.pos.x, yaw: __hunt.player.yaw }))
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x, y }] })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ id: 1, x: x + 38, y }, { id: 2, x: 480, y: 180 }] })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ id: 1, x: x + 38, y }, { id: 2, x: 520, y: 180 }] })
+    await mobile.waitForTimeout(250)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] })
+    const after = await mobile.evaluate(() => ({ x: __hunt.player.pos.x, yaw: __hunt.player.yaw, move: __hunt.controls.state.moveX }))
+    assert.ok(after.x > before.x + 0.05)
+    assert.notEqual(after.yaw, before.yaw)
+    assert.equal(after.move, 0)
+    await mobile.screenshot({ path: path.join(output, 'mobile-hunt.png') })
+  })
+  await check('rotation to portrait pauses the hunt, blocks keys and preserves the same world', async () => {
+    const before = await mobile.evaluate(() => { window.savedHuntEngine = __hunt.engine; return __hunt.bugs[0].userData.t.tt })
+    await mobile.setViewportSize({ width: 390, height: 844 })
+    await mobile.getByRole('dialog', { name: '가로 화면 전용' }).waitFor()
+    assert.equal(await mobile.evaluate(() => __hunt.engine.paused), true)
+    const t = await mobile.evaluate(() => __hunt.bugs[0].userData.t.tt)
+    await mobile.keyboard.press('KeyC'); await mobile.keyboard.press('Space')
+    await mobile.waitForTimeout(180)
+    assert.equal(await mobile.evaluate(() => __hunt.bugs[0].userData.t.tt), t)
+    assert.equal(await mobile.evaluate(() => __hunt.controls.state.held), false)
+    assert.ok(t >= before)
+    await mobile.screenshot({ path: path.join(output, 'mobile-portrait-gate.png') })
+    await mobile.setViewportSize({ width: 844, height: 390 })
+    await mobile.getByRole('dialog', { name: '채집 준비' }).waitFor()
+    assert.equal(await mobile.evaluate(() => __hunt.engine === window.savedHuntEngine), true)
+    assert.equal(await mobile.getByRole('dialog', { name: '조합대', exact: true }).count(), 0)
+    await resume(mobile, true)
+  })
+  await check('small landscape craft panel scrolls and every recipe is reachable', async () => {
+    await mobile.getByRole('button', { name: '🧱 조합', exact: true }).click()
+    const craft = mobile.getByRole('dialog', { name: '조합대', exact: true })
+    await craft.waitFor()
+    const last = mobile.getByRole('button', { name: '함정 블럭 만들기', exact: true })
+    await last.scrollIntoViewIfNeeded()
+    const box = await last.boundingBox()
+    assert.ok(box.y >= 0 && box.y + box.height <= 390)
+    await mobile.screenshot({ path: path.join(output, 'mobile-craft.png') })
+  })
+  await check('tablet keeps touch controls; focus loss pauses and cancels actions', async () => {
+    await mobile.getByRole('button', { name: '닫기 ✕', exact: true }).click(); await resume(mobile, true)
+    await mobile.setViewportSize({ width: 1180, height: 820 })
+    assert.equal(await mobile.getByRole('group', { name: '이동 조이스틱' }).isVisible(), true)
+    await mobile.evaluate(() => window.dispatchEvent(new Event('blur')))
+    assert.equal(await mobile.evaluate(() => __hunt.controls.active), false)
+    await mobile.getByRole('dialog', { name: '채집 준비' }).waitFor()
+    await mobile.setViewportSize({ width: 820, height: 1180 })
+    await mobile.getByRole('dialog', { name: '가로 화면 전용' }).waitFor()
+    assert.equal(await mobile.locator('[inert]').count(), 1)
+    await mobile.setViewportSize({ width: 1180, height: 820 })
+    await mobile.getByRole('dialog', { name: '채집 준비' }).waitFor()
+  })
+  await check('all four habitats can be entered repeatedly with complete starter resources', async () => {
+    for (let i = 0; i < 4; i++) {
+      await mobile.getByRole('dialog', { name: '채집 준비' }).getByRole('button', { name: '🏡 집으로' }).click()
+      await mobile.getByRole('button', { name: '🥅 채집', exact: true }).click()
+      const habitats = mobile.locator('button').filter({ hasText: '들어가기 →' })
+      await habitats.nth(i).click()
+      await mobile.waitForFunction(() => !!window.__hunt?.engine)
+      assert.equal(await mobile.evaluate(() => new Set(__hunt.nodes.map(n => n.userData.node.drop)).size), 6)
+      assert.equal(await mobile.locator('canvas').count(), 1)
+    }
+  })
+  await check('fully blocked storage keeps app playable and warns about session-only records', async () => {
+    const context = await browser.newContext({ viewport: { width: 1000, height: 700 } })
+    await context.addInitScript(() => {
+      Storage.prototype.getItem = () => { throw new DOMException('blocked', 'SecurityError') }
+      Storage.prototype.setItem = () => { throw new DOMException('blocked', 'SecurityError') }
+    })
+    const blocked = await context.newPage()
+    await enter(blocked)
+    const result = await blocked.evaluate(async () => {
+      const save = await import('/src/save/bugpedia.js')
+      save.recordCatch('ladybug'); save.recordCatch('ladybug')
+      return save.loadBugpedia().ladybug.n
+    })
+    assert.equal(result, 2)
+    await blocked.getByRole('status').filter({ hasText: '저장이 차단' }).waitFor()
+    await context.close()
+  })
+  await check('no uncaught browser runtime errors', async () => assert.deepEqual(errors, []))
+  console.log(`${count} browser checks passed. Screenshots: ${output}`)
+})().catch(e => { console.error(e); process.exitCode = 1 }).finally(async () => { await browser?.close() })

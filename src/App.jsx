@@ -16,11 +16,14 @@ import { playBgm } from './game/bgm.js'
 export default function App() {
   const [screen, setScreen] = useState('landing') // 'landing' | 'intro' | 'menu' | 'pedia' | 'careers' | 'micro' | 'worldselect' | 'hunt' | 'home'
   const [habitat, setHabitat] = useState(DEFAULT_HABITAT) // 선택한 서식지
+  const [pediaReturn, setPediaReturn] = useState('menu')
+  const openPedia = from => { setPediaReturn(from); setScreen('pedia') }
 
-  // 🎵 BGM — 화면에 맞는 곡 (곤충 오픈월드는 밝은 크리에이터 무드 재사용)
+  // 🎵 이 게임을 위해 새로 만든 곡을 화면별로 재생한다.
   useEffect(() => {
-    if (screen === 'landing' || screen === 'intro' || screen === 'menu' || screen === 'careers' || screen === 'home' || screen === 'worldselect') playBgm('landing')
-    else if (screen === 'pedia' || screen === 'micro' || screen === 'hunt') playBgm('creator')
+    if (screen === 'home' || screen === 'pedia') playBgm('home')
+    else if (screen === 'micro' || screen === 'hunt') playBgm('explore')
+    else playBgm('garden')
   }, [screen])
 
   // 📱 글로벌 UI 스케일 — 루트 폰트 크기를 뷰포트에 맞춰 조절
@@ -42,12 +45,12 @@ export default function App() {
 
   if (screen === 'landing') return <Landing onStart={() => setScreen('intro')} />
   if (screen === 'intro') return <Cutscene onDone={() => setScreen('menu')} />
-  if (screen === 'menu') return <Menu onOpen={(k) => setScreen(['pedia', 'careers', 'micro', 'worldselect', 'home'].includes(k) ? k : 'menu')} />
-  if (screen === 'pedia') return <Bugpedia onClose={() => setScreen('menu')} />
+  if (screen === 'menu') return <Menu onOpen={(k) => k === 'pedia' ? openPedia('menu') : setScreen(['careers', 'micro', 'worldselect', 'home'].includes(k) ? k : 'menu')} />
+  if (screen === 'pedia') return <Bugpedia onClose={() => setScreen(pediaReturn)} />
   if (screen === 'careers') return <Careers onBack={() => setScreen('menu')} />
   if (screen === 'micro') return <MicroScene onBack={() => setScreen('menu')} />
   if (screen === 'worldselect') return <WorldSelect onPick={(hb) => { setHabitat(hb); setScreen('hunt') }} onBack={() => setScreen('menu')} />
   if (screen === 'hunt') return <BugHunt key={habitat} habitat={habitat} onHome={() => setScreen('home')} />
-  if (screen === 'home') return <Home onHunt={() => setScreen('worldselect')} onPedia={() => setScreen('pedia')} onMenu={() => setScreen('menu')} />
+  if (screen === 'home') return <Home onHunt={() => setScreen('worldselect')} onPedia={() => openPedia('home')} onMenu={() => setScreen('menu')} />
   return null
 }

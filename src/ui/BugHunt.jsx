@@ -4,25 +4,14 @@
 //   💣 폭탄: 범위 기절 · 💉 마취 다트: 재움 · 🕳️ 함정: 밟으면 가둠
 //   대형 곤충(👑 미니보스)은 폭탄·마취·함정으로 재우거나 가둔 뒤에만 잠자리채로 포획.
 import { useEffect, useRef, useState } from 'react'
-import * as THREE from 'three'
-import { ellipsoid, tube, voxMesh, hash3 } from '../game/Vox.js'
-import { makeBug, animateBug } from '../game/BugGen.js'
-import { BUGS, BUG_COUNT, RARITY } from '../game/bugData.js'
-import { recordCatch, bugpediaProgress } from '../save/bugpedia.js'
-import { MATERIALS, NODES, RECIPES } from '../game/bugcraft.js'
-import { loadInventory, addMaterial, craftItem, useItem } from '../save/inventory.js'
+import { BugHuntEngine } from '../game/BugHuntEngine.js'
+import { BUG_COUNT } from '../game/bugData.js'
+import { bugpediaProgress } from '../save/bugpedia.js'
+import { MATERIALS, RECIPES } from '../game/bugcraft.js'
+import { loadInventory, craftItem } from '../save/inventory.js'
 import { HABITATS, DEFAULT_HABITAT } from '../game/habitats.js'
-import { BugViewModel } from '../game/BugVM.js'
-import { buildMega } from '../game/megaProps.js'
-import { buildSky, SKY_TYPES } from '../game/skyProps.js'
-
-const PVOX = 0.22
-const col = (h) => new THREE.Color(h)
-const addV = (parent, shapes, cf, vox = PVOX) => { const m = voxMesh(shapes, cf, vox); if (m) parent.add(m) }
-const R = 10.5 // 채집터 반경 (원형 서식지)
-const MAX_BUGS = 8
-// 희귀도별 스폰 가중 — 흔할수록 자주, 전설은 귀하게 (희귀 곤충)
-const RWEIGHT = { common: 6, uncommon: 3, rare: 1.4, epic: 0.6 }
+import Joystick from './mobile/Joystick.jsx'
+import { useIsTouch } from './mobile/useDevice.js'
 
 const TOOLS = [
   { id: 'trowel', name: '모종삽', icon: '🪏', kind: 'mine' },
@@ -36,736 +25,67 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
   const H = HABITATS[habitat] || HABITATS[DEFAULT_HABITAT]
   const mountRef = useRef(null)
   const api = useRef({})
-  const invRef = useRef(loadInventory())
-  const toolRef = useRef('trowel')
-  const [caught, setCaught] = useState(bugpediaProgress(BUG_COUNT).caught)
+  const invRef = useRef(null)
+  if (!invRef.current) invRef.current = loadInventory()
+  const [caught, setCaught] = useState(() => bugpediaProgress(BUG_COUNT).caught)
   const [mats, setMats] = useState({ ...invRef.current.mats })
   const [items, setItems] = useState({ ...invRef.current.items })
   const [tool, setTool] = useState('trowel')
   const [toast, setToast] = useState(null)
-  const [locked, setLocked] = useState(false)
+  const [paused, setPaused] = useState(true)
+  const [target, setTarget] = useState(null)
+  const isTouch = useIsTouch()
+  const [touchControls, setTouchControls] = useState(isTouch)
+  const resumePointer = useRef('mouse')
   const [showCraft, setShowCraft] = useState(false)
+  const pause = () => { api.current.pause?.(); setPaused(true) }
+  const openCraft = () => { pause(); setShowCraft(true) }
+  const resume = e => {
+    const touch = e.detail !== 0 && (e.nativeEvent?.pointerType || resumePointer.current) === 'touch'
+    setShowCraft(false); setPaused(false); api.current.start?.(touch)
+  }
+  const goHome = () => { pause(); onHome() }
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 3200)
+    return () => clearTimeout(timer)
+  }, [toast])
+  useEffect(() => {
+    if (!showCraft) return
+    const close = e => { if (e.code === 'Escape') setShowCraft(false) }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [showCraft])
 
   // 조합: 소재 차감 + 포획 블럭 +1 (React 쪽에서 처리 — 패널이 React라서)
   const doCraft = (recipe) => {
     if (craftItem(invRef.current, recipe)) {
       setMats({ ...invRef.current.mats }); setItems({ ...invRef.current.items })
       setToast({ txt: `${recipe.icon} ${recipe.name} 제작!`, key: Date.now() })
+      if (recipe.id === 'net') api.current.selectTool?.('net')
     } else {
       setToast({ txt: '소재가 부족해요', key: Date.now() })
     }
   }
 
   useEffect(() => {
-    const mount = mountRef.current
-    if (!mount) return
-    const w = mount.clientWidth, h = mount.clientHeight
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    renderer.setSize(w, h)
-    mount.appendChild(renderer.domElement)
-    const canvas = renderer.domElement
-
-    const scene = new THREE.Scene()
-    scene.background = new THREE.Color(H.sky)
-    scene.fog = new THREE.Fog(H.sky, H.fog[0], H.fog[1])
-    const camera = new THREE.PerspectiveCamera(66, w / h, 0.05, 100)
-    camera.rotation.order = 'YXZ'
-    scene.add(new THREE.HemisphereLight(H.hemi[0], H.hemi[1], H.hemi[2]))
-    const sun = new THREE.DirectionalLight(H.sun[0], H.sun[1]); sun.position.set(6, 12, 5); scene.add(sun)
-    scene.add(camera) // 카메라를 씬에 넣어야 부착된 1인칭 뷰모델이 렌더됨
-    const vm = new BugViewModel(camera) // 🖐️ 손+도구 1인칭 뷰모델
-
-    // 땅 — 잔디 타일 (서식지 색)
-    const tile = new THREE.BoxGeometry(1, 0.5, 1)
-    const gmat = [new THREE.MeshLambertMaterial({ color: new THREE.Color(H.ground[0]) }), new THREE.MeshLambertMaterial({ color: new THREE.Color(H.ground[1]) })]
-    const gi = [new THREE.InstancedMesh(tile, gmat[0], 26 * 26), new THREE.InstancedMesh(tile, gmat[1], 26 * 26)]
-    const dummy = new THREE.Object3D(); const cnt = [0, 0]
-    for (let x = -13; x < 13; x++) for (let z = -13; z < 13; z++) {
-      const alt = (x + z) & 1
-      dummy.position.set(x + 0.5, -0.25, z + 0.5); dummy.updateMatrix()
-      gi[alt].setMatrixAt(cnt[alt]++, dummy.matrix)
-    }
-    gi.forEach((m, i) => { m.count = cnt[i]; m.instanceMatrix.needsUpdate = true; scene.add(m) })
-
-    // ── 배치·충돌 시스템 (요소끼리 안 겹치게 · 일부는 플레이어를 막는 벽=미로) ──
-    const rand = (a, b) => a + Math.random() * (b - a)
-    const occ = []     // 비겹침 점유 { x, z, r }
-    const solids = []  // 플레이어를 막는 원형 장애물 { x, z, r }
-    occ.push({ x: 0, z: 0, r: 2.2 })       // 스폰 지점은 비워둠
-    occ.push({ x: 1.6, z: -1.6, r: 1.1 })  // 조합대 자리
-    const findSpot = (foot, minR, maxR, tries = 28) => {
-      for (let t = 0; t < tries; t++) {
-        const a = Math.random() * Math.PI * 2, r = minR + Math.random() * (maxR - minR)
-        const x = Math.cos(a) * r, z = Math.sin(a) * r
-        let ok = true
-        for (const o of occ) { const dx = x - o.x, dz = z - o.z, rr = foot + o.r; if (dx * dx + dz * dz < rr * rr) { ok = false; break } }
-        if (ok) { const e = { x, z, r: foot }; occ.push(e); return e }
-      }
-      return null
-    }
-    const blockedBySolid = (x, z) => { for (const s of solids) { const dx = x - s.x, dz = z - s.z; if (dx * dx + dz * dz < s.r * s.r) return true } return false }
-
-    // 소품 빌더
-    const swayers = []
-    const grass = (x, z, hh, bx, bz, c) => {
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      addV(g, [tube(0, 0, 0, bx, hh, bz, 0.16, 0.02)], (px, py) => (py > hh * 0.6 ? col('#4E8A3A') : col(c)))
-      g.userData = { sway: 0.05, phase: hash3(x | 0, 2, z | 0) * 6 }; scene.add(g); swayers.push(g)
-    }
-    const flower = (x, z, hh, petal) => {
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      addV(g, [tube(0, 0, 0, 0.1, hh, 0, 0.13, 0.09)], () => col('#4E8A3A'))
-      addV(g, [ellipsoid(0.1, hh + 0.1, 0, 0.3, 0.22, 0.3)], () => col('#F2C14E'))
-      for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; addV(g, [ellipsoid(0.1 + Math.cos(a) * 0.5, hh + 0.1, Math.sin(a) * 0.5, 0.26, 0.1, 0.26)], () => col(petal)) }
-      g.userData = { sway: 0.03, phase: hash3(x | 0, 5, z | 0) * 6 }; scene.add(g); swayers.push(g)
-    }
-    const mushroom = (x, z, hh) => {
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      addV(g, [tube(0, 0, 0, 0, hh, 0, 0.22, 0.16)], () => col('#EFE6D0'))
-      addV(g, [ellipsoid(0, hh + 0.1, 0, 0.55, 0.32, 0.55)], (px, py, pz) => hash3(Math.floor(px * 4 + 9), 0, Math.floor(pz * 4 + 9)) > 0.8 ? col('#F5F0E0') : col('#C8402E'))
-      scene.add(g)
-    }
-    // 🌳 큰 나무 (숲) — 가장자리 랜드마크
-    const bigTree = (x, z) => {
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      addV(g, [tube(0, 0, 0, 0, 5.2, 0, 0.7, 0.5)], () => col('#4A3422'))
-      addV(g, [ellipsoid(0, 5.8, 0, 2.4, 1.8, 2.4), ellipsoid(1.4, 5.2, 0.6, 1.4, 1.2, 1.4)], () => col('#2E4A24'))
-      scene.add(g)
-    }
-    // 🪷 연잎 (연못) — 물 위 발판 느낌의 납작한 원반
-    const lilyPad = (x, z) => {
-      const g = new THREE.Group(); g.position.set(x, 0.02, z)
-      addV(g, [ellipsoid(0, 0.06, 0, 0.9, 0.05, 0.9)], () => col('#3E8A4A'))
-      scene.add(g)
-    }
-    const gc = H.grassColors
-
-    // 🌿 풀숲 클러터 빌더 — 짧은 풀 다발·덤불·바위·키큰풀 벽(미로)
-    const tuft = (x, z, seed) => {
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      const c = gc[Math.floor(hash3(seed, 1, 2) * gc.length) % gc.length]
-      const blades = []
-      for (let i = 0; i < 3; i++) { const a = hash3(seed, i, 3) * Math.PI * 2, rr = 0.06 + hash3(seed, i, 4) * 0.12, hh = 0.5 + hash3(seed, i, 5) * 0.6; blades.push(tube(Math.cos(a) * rr, 0, Math.sin(a) * rr, Math.cos(a) * rr * 1.5, hh, Math.sin(a) * rr * 1.5, 0.06, 0.02)) }
-      addV(g, blades, (px, py) => col(py > 0.35 ? '#4E8A3A' : c))
-      g.userData = { sway: 0.09, phase: hash3(seed, 6, 7) * 6 }; scene.add(g); swayers.push(g)
-    }
-    const bush = (x, z, seed) => {
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      addV(g, [ellipsoid(0, 0.36, 0, 0.55, 0.42, 0.55), ellipsoid(0.3, 0.52, 0.12, 0.34, 0.3, 0.34), ellipsoid(-0.26, 0.46, -0.22, 0.3, 0.28, 0.3)], (px, py) => col(py > 0.5 ? '#5FA34A' : gc[0]))
-      g.userData = { sway: 0.035, phase: hash3(seed, 3, 1) * 6 }; scene.add(g); swayers.push(g)
-    }
-    const rock = (x, z) => {
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      addV(g, [ellipsoid(0, 0.32, 0, 0.62, 0.46, 0.58), ellipsoid(0.36, 0.2, 0.14, 0.32, 0.24, 0.3)], (px, py) => col(py > 0.38 ? '#9AA0A6' : '#787E84'))
-      scene.add(g)
-    }
-    const hedge = (x, z, seed) => {  // 키 큰 풀 벽 — 미로(플레이어를 막음)
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      const blades = []
-      for (let i = 0; i < 9; i++) { const a = hash3(seed, i, 3) * Math.PI * 2, rr = hash3(seed, i, 8) * 0.85, hh = 2.6 + hash3(seed, i, 5) * 1.9; blades.push(tube(Math.cos(a) * rr, 0, Math.sin(a) * rr, Math.cos(a) * rr * 1.1, hh, Math.sin(a) * rr * 1.1, 0.15, 0.03)) }
-      addV(g, blades, (px, py) => col(py > 1.4 ? '#4E8A3A' : gc[0]))
-      g.userData = { sway: 0.04, phase: hash3(seed, 6, 2) * 6 }; scene.add(g); swayers.push(g)
-    }
-
-    // ── 배치: 큰 것/벽부터 자리 선점 → 작은 장식이 빈틈 채움 (서로 안 겹침) ──
-    // 🪀 거대 랜드마크 (경계 밖, 서로 안 겹침)
-    if (H.mega) H.mega.forEach((type) => {
-      const g = buildMega(type); if (!g) return
-      let spot = null
-      for (let t = 0; t < 22 && !spot; t++) {
-        const a = Math.random() * Math.PI * 2, r = R + rand(1.2, 3.4), x = Math.cos(a) * r, z = Math.sin(a) * r
-        let ok = true; for (const o of occ) { const dx = x - o.x, dz = z - o.z, rr = 3.6 + o.r; if (dx * dx + dz * dz < rr * rr) { ok = false; break } }
-        if (ok) { occ.push({ x, z, r: 3.6 }); spot = { x, z } }
-      }
-      if (!spot) return
-      g.rotation.y += Math.random() * Math.PI * 2
-      g.scale.setScalar(1.6 + Math.random() * 0.5)
-      g.position.set(spot.x, 0, spot.z); g.updateMatrixWorld(true)
-      const box = new THREE.Box3().setFromObject(g)
-      const sink = ['baseball', 'marble', 'gumball', 'dice', 'acorn'].includes(type) ? 0.7 : 0.15
-      g.position.y = -box.min.y - sink; scene.add(g)
+    const engine = new BugHuntEngine(mountRef.current, {
+      habitat, inventory: invRef.current,
+      onInventory: inv => { setMats({ ...inv.mats }); setItems({ ...inv.items }) },
+      onToast: txt => setToast({ txt, key: performance.now() + Math.random() }),
+      onCaught: setCaught, onTool: setTool, onTarget: setTarget, onInputMode: setTouchControls,
+      onPause: () => { engine.pause(); setPaused(true) },
+      onCraft: () => { engine.pause(); setPaused(true); setShowCraft(v => !v) },
     })
-    // 🌳 나무·바위·키큰풀 벽·덤불 — 플레이어를 막음(미로처럼 사이를 헤집고 다님)
-    if (H.extra === 'tree') for (const [tx, tz] of [[-8, -6], [7.5, 5]]) { occ.push({ x: tx, z: tz, r: 2.6 }); solids.push({ x: tx, z: tz, r: 1.5 }); bigTree(tx, tz) }
-    for (let i = 0; i < 6; i++) { const s = findSpot(1.1, 3, R - 1.5); if (s) { solids.push({ x: s.x, z: s.z, r: 0.95 }); rock(s.x, s.z) } }
-    for (let i = 0; i < 14; i++) { const s = findSpot(1.45, 2.6, R - 1.4); if (s) { solids.push({ x: s.x, z: s.z, r: 1.15 }); hedge(s.x, s.z, i) } }
-    for (let i = 0; i < 11; i++) { const s = findSpot(0.95, 3, R - 2); if (s) { solids.push({ x: s.x, z: s.z, r: 0.8 }); bush(s.x, s.z, i) } }
-    // 🍄버섯·🌸꽃·🪷연잎 (장식, 안 막음)
-    for (let i = 0; i < (H.mushroomN || 0); i++) { const s = findSpot(0.85, 3, R - 3.5); if (s) mushroom(s.x, s.z, 1.2 + Math.random() * 0.8) }
-    if (H.flowers) for (let i = 0; i < H.flowers.n; i++) { const s = findSpot(0.7, 3, R - 3.5); if (s) flower(s.x, s.z, 2.8 + Math.random() * 1.2, H.flowers.petals[i % H.flowers.petals.length]) }
-    if (H.extra === 'lily') for (let i = 0; i < 6; i++) { const s = findSpot(1.0, 2, R - 2.5); if (s) lilyPad(s.x, s.z) }
-
-    // 🪏 채굴 노드 — 파밍 자원(눈에 잘 띄게 소재 아이콘이 위에 둥실). 벽/장식 사이 빈 곳에.
-    const nodes = []
-    const nodeTypes = Object.keys(NODES)
-    const makeNode = (type, e) => {
-      const spec = NODES[type], x = e.x, z = e.z
-      const g = new THREE.Group(); g.position.set(x, 0, z)
-      addV(g, [ellipsoid(0, 0.26, 0, 0.46, 0.3, 0.46)], (px, py) => (py > 0.3 ? col(spec.top) : col(spec.color)))
-      if (type === 'flowerBud') addV(g, [ellipsoid(0, 0.56, 0, 0.24, 0.22, 0.24)], () => col(spec.top))
-      if (type === 'dewDrop') addV(g, [ellipsoid(0, 0.5, 0, 0.22, 0.28, 0.22)], () => col(spec.top))
-      if (type === 'twigPile') addV(g, [tube(-0.22, 0.2, 0, 0.26, 0.54, 0.1, 0.05, 0.04), tube(0.12, 0.2, -0.16, -0.16, 0.5, 0.15, 0.05, 0.04)], () => col(spec.top))
-      const M = MATERIALS[spec.drop]; const icon = emojiSprite(M?.icon || '❓')
-      if (icon) { icon.scale.setScalar(0.62); icon.position.set(x, 1.0, z); scene.add(icon); g.userData.icon = icon }
-      g.userData.node = { type, drop: spec.drop, hitsLeft: spec.hits, color: spec.color }
-      g.userData.bobPhase = Math.random() * 6; g.userData.occSpot = e
-      scene.add(g); nodes.push(g)
-      return g
-    }
-    const spawnNode = () => { const e = findSpot(0.75, 2.5, R - 1.4); if (e) makeNode(nodeTypes[Math.floor(Math.random() * nodeTypes.length)], e) }
-    for (let i = 0; i < 10; i++) spawnNode()
-
-    // 🌿 키 큰 풀 · 짧은 풀 다발 (빽빽하게, 빈틈을 채움 — 곤충이 사는 밀림)
-    for (let i = 0; i < H.grassN + 6; i++) { const s = findSpot(0.5, 2, R - 1); if (s) grass(s.x, s.z, 3 + Math.random() * 2.4, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 1.2, gc[i % gc.length]) }
-    for (let i = 0; i < 64; i++) { const s = findSpot(0.42, 1.6, R - 1); if (s) tuft(s.x, s.z, i) }
-
-    // ☁️ 하늘 거대 실루엣 flyby — 주기적으로 머리 위를 가로지른다 (작아진 스케일감)
-    const skyTint = H.mood === 'night' ? '#C6D2E4' : '#33404E'
-    const flybys = []
-    let flybyCd = 4 + Math.random() * 5 // 첫 등장까지 (rand는 아래에서 정의됨)
-    const spawnFlyby = () => {
-      const type = SKY_TYPES[Math.floor(Math.random() * SKY_TYPES.length)]
-      const g = buildSky(type, skyTint); if (!g) return
-      g.scale.setScalar(3 + Math.random() * 2.5)
-      const ang = Math.random() * Math.PI * 2
-      const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang))
-      const perpAng = ang + Math.PI / 2, off = rand(-8, 8), startDist = 26
-      g.position.set(-dir.x * startDist + Math.cos(perpAng) * off, 13 + Math.random() * 9, -dir.z * startDist + Math.sin(perpAng) * off)
-      g.rotation.y = Math.atan2(dir.x, dir.z)
-      g.userData.fly = { vel: dir.multiplyScalar(rand(3.5, 6)), tt: Math.random() * 6 }
-      scene.add(g); flybys.push(g)
-    }
-
-    // 🧱 조합대 (월드 중앙 근처 랜드마크 — 여기서 파밍한 소재로 포획 블럭을 만든다는 상징)
-    const bench = new THREE.Group(); bench.position.set(1.6, 0, -1.6)
-    addV(bench, [tube(0, 0, 0, 0, 0.62, 0, 0.34, 0.3)], () => col('#7A5636'))
-    addV(bench, [ellipsoid(0, 0.78, 0, 0.5, 0.14, 0.5)], () => col('#9A6E42'))
-    addV(bench, [boxTop(0, 0.92, 0)], () => col('#B8894E'))
-    scene.add(bench)
-
-    // 곤충 스폰 — 서식지 풀에서 희귀도 가중으로 뽑기 (희귀 곤충일수록 드물게)
-    const bugs = []
-    const pool = H.pool
-    const pickType = () => {
-      let total = 0
-      const ws = pool.map((t) => { const w = RWEIGHT[BUGS[t.id]?.rarity] || 3; total += w; return w })
-      let r = Math.random() * total
-      for (let i = 0; i < pool.length; i++) { r -= ws[i]; if (r <= 0) return pool[i] }
-      return pool[pool.length - 1]
-    }
-    const spawn = (edge = false, announce = false) => {
-      const t = pickType()
-      const m = BUGS[t.id] ? BUGS[t.id].make() : makeBug({ gen: 'beetle', base: '#888', dark: '#333' })
-      m.scale.setScalar(t.s)
-      const a = Math.random() * Math.PI * 2, r = edge ? R - 0.5 : rand(2, R - 1)
-      m.position.set(Math.cos(a) * r, t.fly, Math.sin(a) * r)
-      m.userData.t = { ...t, wanderCd: 0, dir: new THREE.Vector3(0, 0, 1), baseY: t.fly, tt: Math.random() * 6, caught: false, state: 'active', stateT: 0, ind: null }
-      // 곤충별 이동 습성(gait) — 나비 나풀·잠자리 급선회·메뚜기 점프·개미 종종·딱정벌레 기기
-      const fam = BUGS[t.id]?.fam
-      m.userData.t.gait = t.fly > 0 ? (fam === 'dragonfly' ? 'dart' : fam === 'butterfly' ? 'flutter' : 'hover') : (fam === 'grasshopper' ? 'hop' : fam === 'bee' ? 'scuttle' : 'crawl')
-      m.userData.t.hopCd = Math.random() * 1.0; m.userData.t.hopping = false; m.userData.t.hopVy = 0
-      scene.add(m); bugs.push(m)
-      if (t.big) { const s = emojiSprite('👑'); if (s) { s.scale.setScalar(0.5); m.userData.t.crown = s; scene.add(s) } }
-      // ✨ 희귀 곤충 출현 알림 (초기 스폰 제외)
-      const rar = BUGS[t.id]?.rarity
-      if (announce && (rar === 'rare' || rar === 'epic')) notify(`✨ ${rar === 'epic' ? '전설' : '희귀'} 곤충 ${BUGS[t.id].name} 출현!`)
-    }
-    for (let i = 0; i < MAX_BUGS; i++) spawn()
-
-    // 플레이어 상태 — y=발 높이, vy=수직속도, onGround
-    const player = { pos: new THREE.Vector3(0, 0, 0), yaw: 0, pitch: 0, y: 0, vy: 0, onGround: true }
-    const eye = 1.35 // 눈높이(발 기준)
-    const keys = { f: false, b: false, l: false, r: false }
-    const move = { touchFwd: false }
-
-    // 🧱 설치한 블럭 — 셀("ix,iz") → 높이(쌓인 칸 수). 위에 올라서거나 벽으로 막힘
-    const blockH = new Map()
-    const blockMeshes = [] // { key, mesh }
-    const cellKey = (x, z) => `${Math.floor(x)},${Math.floor(z)}`
-    const heightAt = (x, z) => blockH.get(cellKey(x, z)) || 0
-    const blockTopMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(H.ground[0]).multiplyScalar(1.15) })
-    const blockSideMat = new THREE.MeshLambertMaterial({ color: '#7A5636' })
-    const blockGeo = new THREE.BoxGeometry(1, 1, 1)
-    const blockMats = [blockSideMat, blockSideMat, blockTopMat, blockSideMat, blockSideMat, blockSideMat]
-    const addBlockMesh = (ix, iz, level) => {
-      const m = new THREE.Mesh(blockGeo, blockMats)
-      m.position.set(ix + 0.5, level + 0.5, iz + 0.5); scene.add(m)
-      blockMeshes.push({ key: `${ix},${iz},${level}`, mesh: m })
-    }
-
-    // 파티클 (poof)
-    const poofs = []
-    const poof = (pos, hex = '#ffffff', n = 8) => {
-      for (let i = 0; i < n; i++) {
-        const s = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), new THREE.MeshBasicMaterial({ color: hex }))
-        s.position.copy(pos)
-        const a = Math.random() * Math.PI * 2, up = rand(1, 3)
-        s.userData.v = new THREE.Vector3(Math.cos(a) * rand(1, 2.5), up, Math.sin(a) * rand(1, 2.5))
-        s.userData.life = 0.6; scene.add(s); poofs.push(s)
-      }
-    }
-
-    const notify = (txt) => setToast({ txt, key: (perf() + Math.random()) })
-    const syncInv = () => { setMats({ ...invRef.current.mats }); setItems({ ...invRef.current.items }) }
-
-    // 조준 대상 — 시야 원뿔 안, 가장 가까운 것
-    const dirV = new THREE.Vector3()
-    const nearestInCone = (list, maxD, minDot = 0.5, posOf = (o) => o.position) => {
-      camera.getWorldDirection(dirV)
-      const camPos = camera.position
-      let best = null, bestD = maxD
-      for (const o of list) {
-        const p = posOf(o)
-        const to = p.clone().sub(camPos); const d = to.length()
-        if (d > bestD) continue
-        if (to.normalize().dot(dirV) < minDot) continue
-        best = o; bestD = d
-      }
-      return best
-    }
-
-    // 🧱 블럭 설치/제거 — 우클릭 설치, 모종삽으로 제거 (마인크래프트식 건축)
-    const useMat = (mat) => { if ((invRef.current.mats[mat] || 0) < 1) return false; addMaterial(invRef.current, mat, -1); syncInv(); return true }
-    const placeBlock = () => {
-      vm.swing()
-      camera.getWorldDirection(dirV); dirV.y = 0
-      if (dirV.lengthSq() < 1e-4) return
-      dirV.normalize()
-      const ix = Math.floor(player.pos.x + dirV.x * 1.4), iz = Math.floor(player.pos.z + dirV.z * 1.4)
-      if (ix === Math.floor(player.pos.x) && iz === Math.floor(player.pos.z)) { notify('한 발짝 물러나서 설치해요'); return }
-      if (Math.hypot(ix + 0.5, iz + 0.5) > R) return
-      if (!useMat('dirt')) { notify('🟫 흙덩이가 필요해요 (🪏로 흙더미 캐기)'); return }
-      const lvl = blockH.get(`${ix},${iz}`) || 0
-      addBlockMesh(ix, iz, lvl); blockH.set(`${ix},${iz}`, lvl + 1)
-      poof(new THREE.Vector3(ix + 0.5, lvl + 0.5, iz + 0.5), '#8A5A34', 5)
-    }
-    const nearestBlock = () => {
-      if (!blockMeshes.length) return null
-      camera.getWorldDirection(dirV)
-      let best = null, bestD = 3.2
-      for (const bm of blockMeshes) {
-        const to = bm.mesh.position.clone().sub(camera.position); const d = to.length()
-        if (d > bestD) continue
-        if (to.normalize().dot(dirV) < 0.55) continue
-        const [ix, iz] = bm.key.split(',').map(Number)
-        best = { ix, iz, d }; bestD = d
-      }
-      return best
-    }
-    const removeBlock = (ix, iz) => {
-      const key = `${ix},${iz}`; const lvl = blockH.get(key) || 0
-      if (lvl <= 0) return
-      const topKey = `${ix},${iz},${lvl - 1}`
-      const idx = blockMeshes.findIndex((b) => b.key === topKey)
-      if (idx >= 0) { scene.remove(blockMeshes[idx].mesh); blockMeshes.splice(idx, 1) }
-      if (lvl - 1 <= 0) blockH.delete(key); else blockH.set(key, lvl - 1)
-      addMaterial(invRef.current, 'dirt', 1); syncInv()
-      poof(new THREE.Vector3(ix + 0.5, lvl - 0.5, iz + 0.5), '#8A5A34', 5)
-    }
-
-    // 🪏 채굴 — 노드 or 설치한 블럭 캐기
-    const tryMine = () => {
-      // 먼저 정면의 설치 블럭을 캐서 되돌려받기
-      const nb = nearestBlock()
-      const node = nearestInCone(nodes, 3.0, 0.45)
-      if (nb && (!node || nb.d < node.position.distanceTo(camera.position))) { removeBlock(nb.ix, nb.iz); return }
-      if (!node) return
-      const nd = node.userData.node
-      poof(node.position.clone().add(new THREE.Vector3(0, 0.3, 0)), MATERIALS[nd.drop]?.color || '#caa', 5)
-      nd.hitsLeft -= 1
-      if (nd.hitsLeft <= 0) {
-        addMaterial(invRef.current, nd.drop, 1); syncInv()
-        const M = MATERIALS[nd.drop]
-        notify(`${M?.icon || '🎁'} ${M?.name || nd.drop} +1`)
-        if (node.userData.icon) scene.remove(node.userData.icon)
-        if (node.userData.occSpot) { const oi = occ.indexOf(node.userData.occSpot); if (oi >= 0) occ.splice(oi, 1) }
-        scene.remove(node); nodes.splice(nodes.indexOf(node), 1)
-        setTimeout(spawnNode, 9000)
-      } else {
-        node.userData.bounce = 0.16 // 캐는 피드백(살짝 눌림)
-      }
-    }
-
-    // 🥅 잠자리채 포획 — 얌전한 곤충 or 무력화(기절/재움/가둠)된 곤충
-    const doCatch = (best) => {
-      best.userData.t.caught = true
-      poof(best.position.clone().add(new THREE.Vector3(0, 0.4, 0)), '#ffffff', 10)
-      const id = best.userData.t.id
-      const rec = recordCatch(id)
-      const name = BUGS[id]?.name || '곤충'
-      notify(rec.isNew ? `🎉 ${name} 처음 채집! 도감 해금!` : `🥅 ${name} 채집!`)
-      setCaught(bugpediaProgress(BUG_COUNT).caught)
-      removeBug(best)
-      setTimeout(() => spawn(false, true), 1200)
-    }
-    const tryNet = () => {
-      if (!(invRef.current.items.net > 0)) { notify('🥅 먼저 잠자리채를 만들어요! (🧱 조합 · 🪏로 나뭇가지·잎 파밍)'); return }
-      const best = nearestInCone(bugs.filter((b) => !b.userData.t.caught), 3.4, 0.5)
-      if (!best) return
-      const u = best.userData.t
-      if (u.big && u.state === 'active') { notify('👑 너무 커요! 폭탄·마취·함정으로 먼저 재워야 해요'); return }
-      doCatch(best)
-    }
-
-    // 💣 폭탄 — 던져서 착지 지점 범위 기절
-    const bombs = []
-    const throwBomb = () => {
-      if (!useItem(invRef.current, 'bomb')) { notify('💣 폭탄이 없어요 · 🧱 조합에서 만들어요'); syncInv(); return }
-      syncInv()
-      const b = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshLambertMaterial({ color: 0x222222 }))
-      camera.getWorldDirection(dirV)
-      b.position.copy(camera.position).addScaledVector(dirV, 0.4)
-      b.userData.v = dirV.clone().multiplyScalar(6.5).add(new THREE.Vector3(0, 3.8, 0))
-      scene.add(b); bombs.push(b)
-    }
-    const explode = (pos) => {
-      poof(pos.clone().add(new THREE.Vector3(0, 0.2, 0)), '#F2C14E', 14)
-      poof(pos.clone().add(new THREE.Vector3(0, 0.2, 0)), '#E8763A', 10)
-      let hit = 0
-      for (const b of bugs) {
-        const u = b.userData.t; if (u.caught) continue
-        if (b.position.distanceTo(pos) <= 4.2) { setState(b, 'stunned', 5.0); hit++ }
-      }
-      if (hit) notify(`💥 ${hit}마리 기절! 지금 🥅 잠자리채로!`)
-    }
-
-    // 💉 마취 다트 — 조준한 곤충을 향해 발사해 재움
-    const darts = []
-    const fireDart = () => {
-      const target = nearestInCone(bugs.filter((b) => !b.userData.t.caught && b.userData.t.state === 'active'), 9, 0.9)
-      if (!target) { notify('💉 조준점을 곤충에 맞춰 쏘세요'); return }
-      if (!useItem(invRef.current, 'dart')) { notify('💉 마취 다트가 없어요 · 🧱 조합에서 만들어요'); syncInv(); return }
-      syncInv()
-      const d = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.4, 6), new THREE.MeshBasicMaterial({ color: 0xE85A7A }))
-      d.position.copy(camera.position)
-      d.userData.target = target
-      scene.add(d); darts.push(d)
-    }
-
-    // 🕳️ 함정 — 앞쪽 땅에 설치, 곤충이 밟으면 가둠
-    const traps = []
-    const placeTrap = () => {
-      if (!useItem(invRef.current, 'trap')) { notify('🕳️ 함정이 없어요 · 🧱 조합에서 만들어요'); syncInv(); return }
-      syncInv()
-      camera.getWorldDirection(dirV); dirV.y = 0; dirV.normalize()
-      const p = new THREE.Vector3(player.pos.x, 0, player.pos.z).addScaledVector(dirV, 2.2)
-      const dd = Math.hypot(p.x, p.z); if (dd > R - 0.5) p.multiplyScalar((R - 0.5) / dd)
-      const g = new THREE.Group(); g.position.copy(p)
-      addV(g, [ellipsoid(0, 0.05, 0, 0.55, 0.06, 0.55)], () => col('#241a10'))
-      for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2; addV(g, [tube(Math.cos(a) * 0.4, 0.06, Math.sin(a) * 0.4, Math.cos(a) * 0.55, 0.34, Math.sin(a) * 0.55, 0.05, 0.03)], () => col('#6B4A2A')) }
-      g.userData.trap = { r: 0.95, life: 22 }
-      scene.add(g); traps.push(g)
-      notify('🕳️ 함정 설치! 곤충이 밟으면 갇혀요')
-    }
-
-    // 곤충 상태 세팅 + 표시 아이콘
-    const setState = (b, st, t) => {
-      const u = b.userData.t; u.state = st; u.stateT = t
-      if (u.ind) { scene.remove(u.ind); u.ind = null }
-      const emo = st === 'stunned' ? '💫' : st === 'asleep' ? '💤' : st === 'trapped' ? '🔒' : ''
-      if (emo) { const s = emojiSprite(emo); if (s) { s.scale.setScalar(0.5); u.ind = s; scene.add(s) } }
-    }
-    const removeBug = (b) => {
-      const u = b.userData.t
-      if (u.ind) scene.remove(u.ind)
-      if (u.crown) scene.remove(u.crown)
-      scene.remove(b); bugs.splice(bugs.indexOf(b), 1)
-    }
-
-    // 🐛 곤충별 리얼 이동(gait) — 몸 방향을 부드럽게 돌리고, 습성대로 움직인다
-    const turnTo = (b, ang, rate, dt) => {
-      const d = ((ang - b.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI
-      b.rotation.y += d * Math.min(1, rate * dt)
-    }
-    const gaitStep = (b, u, dt, pd, toP) => {
-      const scared = pd < 3.0 && u.shy > 0.05
-      u.wanderCd -= dt
-      if (scared && Math.random() < u.shy * dt * 3.5) { u.dir.copy(toP).setY(0).normalize().multiplyScalar(-1); u.wanderCd = rand(0.6, 1.3) }
-      else if (u.wanderCd <= 0) {
-        const base = Math.atan2(u.dir.x, u.dir.z)
-        const spread = u.gait === 'dart' ? 2.2 : u.gait === 'flutter' ? 1.6 : 1.0
-        const a = base + rand(-spread, spread); u.dir.set(Math.sin(a), 0, Math.cos(a))
-        u.wanderCd = u.gait === 'dart' ? rand(0.5, 1.1) : u.gait === 'scuttle' ? rand(0.4, 1.0) : rand(1.2, 2.8)
-      }
-      let mul = scared ? 1.7 : 1
-      if (u.gait === 'hop') { // 🦗 메뚜기 — 앉았다가 톡톡 튀어오름
-        if (u.hopping) {
-          u.hopVy -= 11 * dt; b.position.y += u.hopVy * dt
-          b.position.x += u.dir.x * u.spd * 2.6 * dt; b.position.z += u.dir.z * u.spd * 2.6 * dt
-          if (b.position.y <= 0) { b.position.y = 0; u.hopping = false; u.hopCd = rand(0.5, scared ? 0.6 : 1.6) }
-        } else { u.hopCd -= dt; if (u.hopCd <= 0) { u.hopping = true; u.hopVy = 2.6 + (scared ? 0.7 : 0) } }
-        turnTo(b, Math.atan2(u.dir.x, u.dir.z), 6, dt)
-      } else if (u.baseY > 0) { // 🦋🪰🐝 나는 곤충
-        if (u.gait === 'dart') mul *= 1.5
-        else if (u.gait === 'flutter') { const a = Math.atan2(u.dir.x, u.dir.z) + Math.sin(u.tt * 4) * 0.5; u.dir.set(Math.sin(a), 0, Math.cos(a)); mul *= 0.8 }
-        else mul *= 0.7
-        b.position.x += u.dir.x * u.spd * mul * dt; b.position.z += u.dir.z * u.spd * mul * dt
-        b.position.y = u.baseY + Math.sin(u.tt * (u.gait === 'dart' ? 9 : 4.5)) * (u.gait === 'dart' ? 0.12 : u.gait === 'hover' ? 0.22 : 0.3)
-        turnTo(b, Math.atan2(u.dir.x, u.dir.z), u.gait === 'dart' ? 4 : 3, dt)
-      } else { // 🐜🪲 기어다니는 곤충
-        if (u.gait === 'scuttle') { const a = Math.atan2(u.dir.x, u.dir.z) + Math.sin(u.tt * 6) * 0.15; u.dir.set(Math.sin(a), 0, Math.cos(a)) }
-        else mul *= 0.85
-        b.position.x += u.dir.x * u.spd * mul * dt; b.position.z += u.dir.z * u.spd * mul * dt
-        b.position.y = 0
-        turnTo(b, Math.atan2(u.dir.x, u.dir.z), u.gait === 'scuttle' ? 7 : 4, dt)
-      }
-      const bd = Math.hypot(b.position.x, b.position.z)
-      if (bd > R - 0.5) { u.dir.multiplyScalar(-1); b.position.x += u.dir.x * u.spd * dt * 2; b.position.z += u.dir.z * u.spd * dt * 2 }
-    }
-
-    // 도구별 액션 실행
-    const useTool = () => {
-      vm.swing()
-      switch (toolRef.current) {
-        case 'trowel': tryMine(); break
-        case 'net': tryNet(); break
-        case 'bomb': throwBomb(); break
-        case 'dart': fireDart(); break
-        case 'trap': placeTrap(); break
-      }
-    }
-
-    api.current.useTool = useTool
-    api.current.setTouchFwd = (v) => { move.touchFwd = v }
-    api.current.jump = () => { keys.jump = true }
-    api.current.place = placeBlock
-    api.current.selectTool = (id) => { toolRef.current = id; setTool(id); vm.setTool(id) }
-    if (import.meta.env.DEV) window.__hunt = { // 테스트/디버깅용
-      use: useTool, tool: (id) => { toolRef.current = id }, look: (d, p) => { player.yaw += d; if (p != null) player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch + p)) },
-      mine: tryMine, net: tryNet, bomb: throwBomb, dart: fireDart, trap: placeTrap,
-      inv: invRef.current, bugs, nodes, bombs, darts, traps, blocks: blockMeshes, flybys,
-      place: placeBlock, jump: () => { keys.jump = true }, flyby: spawnFlyby,
-      give: (mat, n = 1) => { addMaterial(invRef.current, mat, n); syncInv() }, // 소재 지급(실제 인벤 경로) — 조합 검증용
-      soloBig: () => { // 대형 곤충 1마리만 정면에 두고 플레이어를 원점으로 — 헌터 포획 결정적 검증용
-        for (const b of [...bugs]) removeBug(b)
-        const t = pool.find((p) => p.big) || pool[0]
-        const m = BUGS[t.id].make(); m.scale.setScalar(t.s); m.position.set(0, 0, -2.6)
-        m.userData.t = { ...t, spd: 0, wanderCd: 1e9, dir: new THREE.Vector3(), baseY: 0, tt: 0, caught: false, state: 'active', stateT: 0, ind: null }
-        scene.add(m); bugs.push(m)
-        const s = emojiSprite('👑'); if (s) { s.scale.setScalar(0.5); m.userData.t.crown = s; scene.add(s) }
-        player.pos.set(0, 0, 0); player.yaw = 0; player.pitch = 0
-        camera.position.set(0, eye, 0); camera.rotation.set(0, 0, 0); camera.updateMatrixWorld(true)
-        return t.id
-      },
-      mineNearest: () => { // 가장 가까운 노드 옆으로 이동·조준 후 채굴 (결정적 파밍 테스트용)
-        if (!nodes.length) return false
-        let best = nodes[0], bd = Infinity
-        for (const n of nodes) { const d = n.position.distanceToSquared(player.pos); if (d < bd) { bd = d; best = n } }
-        const dir = best.position.clone().sub(new THREE.Vector3(player.pos.x, 0, player.pos.z)); dir.y = 0; dir.normalize()
-        player.pos.set(best.position.x - dir.x * 1.4, 0, best.position.z - dir.z * 1.4)
-        player.yaw = Math.atan2(-dir.x, -dir.z); player.pitch = Math.atan2(best.position.y + 0.2 - eye, 1.4)
-        camera.position.set(player.pos.x, eye, player.pos.z); camera.rotation.y = player.yaw; camera.rotation.x = player.pitch
-        camera.updateMatrixWorld(true)
-        tryMine(); return true
-      },
-      faceNearestBug: (big) => { // 조준을 가장 가까운 (대형) 곤충으로
-        const list = bugs.filter((b) => !b.userData.t.caught && (big == null || !!b.userData.t.big === big))
-        if (!list.length) return null
-        list.sort((a, c) => a.position.distanceToSquared(camera.position) - c.position.distanceToSquared(camera.position))
-        const b = list[0]
-        const dx = b.position.x - camera.position.x, dz = b.position.z - camera.position.z
-        const flat = Math.hypot(dx, dz)
-        player.yaw = Math.atan2(-dx, -dz); player.pitch = Math.atan2(b.position.y + 0.2 - eye, flat)
-        camera.position.set(player.pos.x, eye, player.pos.z); camera.rotation.y = player.yaw; camera.rotation.x = player.pitch
-        camera.updateMatrixWorld(true)
-        return b.userData.t.id
-      },
-    }
-
-    // 입력 — 시점잠금(데스크톱)
-    const isLocked = () => document.pointerLockElement === canvas
-    const onDown = (e) => {
-      if (!isLocked() && e.pointerType !== 'touch') { canvas.requestPointerLock?.(); return }
-      if (!isLocked()) return
-      if (e.button === 2) placeBlock()   // 우클릭: 블럭 설치
-      else useTool()                     // 좌클릭: 도구 사용
-    }
-    const onCtx = (e) => e.preventDefault() // 우클릭 메뉴 차단
-    const onMove = (e) => { if (!isLocked()) return; player.yaw -= e.movementX * 0.0022; player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch - e.movementY * 0.0022)) }
-    const onLock = () => setLocked(isLocked())
-    const onKey = (e, v) => {
-      switch (e.code) {
-        case 'KeyW': case 'ArrowUp': keys.f = v; break
-        case 'KeyS': case 'ArrowDown': keys.b = v; break
-        case 'KeyA': case 'ArrowLeft': keys.l = v; break
-        case 'KeyD': case 'ArrowRight': keys.r = v; break
-        case 'Digit1': if (v) api.current.selectTool('trowel'); break
-        case 'Digit2': if (v) api.current.selectTool('net'); break
-        case 'Digit3': if (v) api.current.selectTool('bomb'); break
-        case 'Digit4': if (v) api.current.selectTool('dart'); break
-        case 'Digit5': if (v) api.current.selectTool('trap'); break
-        case 'Space': keys.jump = v; e.preventDefault(); break
-        case 'KeyC': case 'KeyE': if (v) { document.exitPointerLock?.(); setShowCraft((s) => !s); e.preventDefault() } break // 조합 열기(포인터 잠금 해제 → 클릭 가능)
-      }
-    }
-    const kd = (e) => onKey(e, true), ku = (e) => onKey(e, false)
-    // 터치 드래그 시점
-    let tId = null, tLast = null
-    const ts = (e) => { const t = e.changedTouches[0]; tId = t.identifier; tLast = { x: t.clientX, y: t.clientY } }
-    const tm = (e) => { for (const t of e.changedTouches) { if (t.identifier !== tId) continue; player.yaw -= (t.clientX - tLast.x) * 0.005; player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch - (t.clientY - tLast.y) * 0.005)); tLast = { x: t.clientX, y: t.clientY }; e.preventDefault() } }
-    const te = (e) => { for (const t of e.changedTouches) if (t.identifier === tId) { tId = null; tLast = null } }
-    canvas.addEventListener('mousedown', onDown)
-    canvas.addEventListener('contextmenu', onCtx)
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('pointerlockchange', onLock)
-    document.addEventListener('keydown', kd); document.addEventListener('keyup', ku)
-    canvas.addEventListener('touchstart', ts, { passive: false })
-    canvas.addEventListener('touchmove', tm, { passive: false })
-    canvas.addEventListener('touchend', te)
-
-    // 루프
-    let raf, last = perf(), walkPhase = 0
-    const fwd = new THREE.Vector3(), right = new THREE.Vector3()
-    const up = new THREE.Vector3(0, 1, 0)
-    const loop = (now) => {
-      const dt = Math.min(0.05, (now - last) / 1000); last = now
-      // 수평 이동 — 블럭 벽/장애물(바위·덤불·키큰풀 벽)을 막고, 1칸 블럭까진 자동으로 오름
-      const sp = 2.5 * dt
-      fwd.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw))
-      right.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw))
-      const mv = new THREE.Vector3()
-      const kb = isLocked() // 조합 패널 등으로 잠금 해제 시 키보드 이동 정지(모바일 터치는 유지)
-      if ((keys.f && kb) || move.touchFwd) mv.add(fwd)
-      if (keys.b && kb) mv.sub(fwd)
-      if (keys.l && kb) mv.sub(right)
-      if (keys.r && kb) mv.add(right)
-      const moving = mv.lengthSq() > 0
-      if (moving) {
-        mv.normalize()
-        const canStep = (nx, nz) => (heightAt(nx, nz) - player.y) <= 1.05 && !blockedBySolid(nx, nz)
-        const nx = player.pos.x + mv.x * sp; if (canStep(nx, player.pos.z)) player.pos.x = nx
-        const nz = player.pos.z + mv.z * sp; if (canStep(player.pos.x, nz)) player.pos.z = nz
-      }
-      const pd0 = Math.hypot(player.pos.x, player.pos.z)
-      if (pd0 > R) { player.pos.multiplyScalar(R / pd0) }
-      // 수직 물리 — 점프·중력·블럭 위 착지
-      const groundY = heightAt(player.pos.x, player.pos.z)
-      if (keys.jump && player.onGround) { player.vy = 5.6; player.onGround = false; keys.jump = false }
-      player.vy -= 18 * dt
-      player.y += player.vy * dt
-      if (player.y <= groundY) { player.y = groundY; player.vy = 0; player.onGround = true } else player.onGround = false
-      // 카메라 — 눈높이 + 걷기 상하 bob
-      if (moving && player.onGround) walkPhase += dt * 6
-      const bob = Math.sin(walkPhase) * (moving && player.onGround ? 0.045 : 0)
-      camera.position.set(player.pos.x, player.y + eye + bob, player.pos.z)
-      camera.rotation.y = player.yaw; camera.rotation.x = player.pitch
-      vm.update(dt, moving && player.onGround)
-
-      // 소품 흔들림
-      const T = now / 1000
-      for (const s of swayers) s.rotation.z = Math.sin(T * 1.3 + s.userData.phase) * s.userData.sway
-
-      // 채굴 노드 — 잘 보이게 살짝 둥실 + 캐면 눌림 피드백, 소재 아이콘도 따라 뜸
-      for (const n of nodes) {
-        const bob = Math.sin(T * 2 + (n.userData.bobPhase || 0)) * 0.07
-        n.position.y = n.userData.bounce ? -0.1 : bob
-        if (n.userData.bounce) { n.userData.bounce -= dt; if (n.userData.bounce <= 0) n.userData.bounce = 0 }
-        if (n.userData.icon) n.userData.icon.position.y = n.position.y + 1.0 + bob * 0.4
-      }
-
-      // 곤충 AI + 상태
-      for (const b of bugs) {
-        const u = b.userData.t; u.tt += dt; animateBug(b, u.tt)
-        // 무력화 상태 처리
-        if (u.state !== 'active') {
-          if (u.state === 'trapped') { /* 잡을 때까지 유지(함정 life가 끝나면 풀림) */ }
-          else { u.stateT -= dt; if (u.stateT <= 0) setState(b, 'active', 0) }
-          if (u.state === 'asleep') b.position.y = Math.max(0, (u.baseY || 0) * 0.15) // 스르륵 내려앉음
-          if (u.ind) { u.ind.position.set(b.position.x, b.position.y + 0.9 + (u.state === 'stunned' ? Math.sin(u.tt * 8) * 0.05 : 0), b.position.z) }
-          if (u.crown) u.crown.position.set(b.position.x, b.position.y + 1.15, b.position.z)
-          continue
-        }
-        const toP = new THREE.Vector3(player.pos.x - b.position.x, 0, player.pos.z - b.position.z)
-        const pd = toP.length()
-        gaitStep(b, u, dt, pd, toP)
-        if (u.crown) u.crown.position.set(b.position.x, b.position.y + 1.15, b.position.z)
-
-        // 함정 밟음 판정
-        for (const tr of traps) {
-          if (Math.hypot(b.position.x - tr.position.x, b.position.z - tr.position.z) < tr.userData.trap.r) {
-            setState(b, 'trapped', 999); b.position.x = tr.position.x; b.position.z = tr.position.z
-            poof(tr.position.clone().add(new THREE.Vector3(0, 0.2, 0)), '#8A6A3A', 8)
-            notify('🔒 곤충이 함정에 걸렸어요! 🥅 잠자리채로!')
-            scene.remove(tr); traps.splice(traps.indexOf(tr), 1)
-            break
-          }
-        }
-      }
-
-      // 함정 수명
-      for (let i = traps.length - 1; i >= 0; i--) { const tr = traps[i]; tr.userData.trap.life -= dt; if (tr.userData.trap.life <= 0) { scene.remove(tr); traps.splice(i, 1) } }
-
-      // 폭탄 물리
-      for (let i = bombs.length - 1; i >= 0; i--) {
-        const b = bombs[i]; b.userData.v.y -= 12 * dt
-        b.position.addScaledVector(b.userData.v, dt); b.rotation.x += dt * 8
-        const bd = Math.hypot(b.position.x, b.position.z)
-        if (bd > R) { b.position.multiplyScalar(R / bd); b.userData.v.x *= -0.4; b.userData.v.z *= -0.4 }
-        if (b.position.y <= 0.16) { explode(b.position.clone().setY(0.16)); scene.remove(b); bombs.splice(i, 1) }
-      }
-
-      // 다트 유도
-      for (let i = darts.length - 1; i >= 0; i--) {
-        const d = darts[i]; const tg = d.userData.target
-        if (!tg || tg.userData.t.caught || bugs.indexOf(tg) < 0) { scene.remove(d); darts.splice(i, 1); continue }
-        const to = tg.position.clone().setY(tg.position.y + 0.2).sub(d.position)
-        const dist = to.length()
-        d.quaternion.setFromUnitVectors(up, to.clone().normalize())
-        d.position.addScaledVector(to.normalize(), Math.min(dist, 18 * dt))
-        if (dist < 0.35) {
-          setState(tg, 'asleep', 9.0)
-          poof(tg.position.clone().add(new THREE.Vector3(0, 0.3, 0)), '#E85A7A', 8)
-          notify('💤 곤충이 잠들었어요! 🥅 잠자리채로!')
-          scene.remove(d); darts.splice(i, 1)
-        }
-      }
-
-      // 포획 파티클
-      for (let i = poofs.length - 1; i >= 0; i--) {
-        const p = poofs[i]; p.userData.life -= dt
-        p.userData.v.y -= 8 * dt
-        p.position.addScaledVector(p.userData.v, dt)
-        p.scale.multiplyScalar(1 - dt * 2)
-        if (p.userData.life <= 0) { scene.remove(p); poofs.splice(i, 1) }
-      }
-
-      // ☁️ 하늘 실루엣 flyby — 스폰·드리프트·소멸
-      flybyCd -= dt
-      if (flybyCd <= 0 && flybys.length < 2) { spawnFlyby(); flybyCd = rand(11, 20) }
-      for (let i = flybys.length - 1; i >= 0; i--) {
-        const g = flybys[i]; const f = g.userData.fly; f.tt += dt
-        g.position.addScaledVector(f.vel, dt)
-        g.position.y += Math.sin(f.tt * 0.8) * dt * 0.5
-        g.rotation.z = Math.sin(f.tt * 0.6) * 0.06
-        if (g.userData.flap) { const a = Math.sin(f.tt * 4) * 0.5; g.userData.flap[0].rotation.x = a; g.userData.flap[1].rotation.x = -a }
-        if (Math.hypot(g.position.x, g.position.z) > 36) { scene.remove(g); flybys.splice(i, 1) }
-      }
-
-      renderer.render(scene, camera)
-      raf = requestAnimationFrame(loop)
-    }
-    raf = requestAnimationFrame(loop)
-
-    const onResize = () => { const ww = mount.clientWidth, hh = mount.clientHeight; renderer.setSize(ww, hh); camera.aspect = ww / hh; camera.updateProjectionMatrix() }
-    window.addEventListener('resize', onResize)
-
-    return () => {
-      cancelAnimationFrame(raf); window.removeEventListener('resize', onResize)
-      canvas.removeEventListener('mousedown', onDown); canvas.removeEventListener('contextmenu', onCtx); document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('pointerlockchange', onLock)
-      document.removeEventListener('keydown', kd); document.removeEventListener('keyup', ku)
-      canvas.removeEventListener('touchstart', ts); canvas.removeEventListener('touchmove', tm); canvas.removeEventListener('touchend', te)
-      if (isLocked()) document.exitPointerLock?.()
-      renderer.dispose(); if (canvas.parentNode === mount) mount.removeChild(canvas)
-    }
-  }, [])
+    api.current = engine
+    return () => { engine.dispose(); api.current = {} }
+  }, [habitat])
 
   const activeTool = TOOLS.find((t) => t.id === tool)
 
   return (
     <div className="relative h-full w-full overflow-hidden select-none" style={{ background: H.sky }}>
-      <div ref={mountRef} className="absolute inset-0 h-full w-full" />
+      <div ref={mountRef} className="absolute inset-0 h-full w-full" style={{ touchAction: 'none' }} />
 
       {/* 조준점 */}
       <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -775,9 +95,9 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       {/* (1인칭 손+도구는 3D 뷰모델로 표현됨) */}
 
       {/* 상단 HUD — 도감 진행 · 소재 */}
-      <div className="absolute left-4 top-4 flex flex-col gap-2">
+      <div className="pointer-events-none absolute left-3 top-3 flex flex-col gap-2">
         <div className="rounded-xl bg-black/40 px-4 py-2 font-pixel text-sm text-white backdrop-blur">{H.icon} {H.label} · 🐛 {caught}/{BUG_COUNT}</div>
-        <div className="flex flex-wrap gap-1.5 max-w-[62vw]">
+        <div className="flex flex-wrap gap-1.5 max-w-[48vw]">
           {Object.keys(MATERIALS).map((k) => (
             <span key={k} className="rounded-lg bg-black/35 px-2 py-1 font-sans text-xs text-white backdrop-blur" title={MATERIALS[k].name}>
               {MATERIALS[k].icon} {mats[k] || 0}
@@ -787,8 +107,9 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       </div>
 
       <div className="absolute right-4 top-4 z-10 flex gap-2">
-        <button onClick={() => setShowCraft(true)} className="rounded-lg bg-[#8FE06B]/90 px-4 py-1.5 font-pixel text-sm text-[#1e3a14] shadow hover:bg-[#8FE06B]">🧱 조합</button>
-        <button onClick={onHome} className="rounded-lg bg-black/40 px-4 py-1.5 font-pixel text-sm text-white backdrop-blur hover:bg-black/60">🏡 집으로</button>
+        <button onClick={pause} aria-label="일시정지" className="rounded-lg bg-black/40 px-3 py-1.5 font-pixel text-sm text-white">Ⅱ</button>
+        <button onClick={openCraft} className="rounded-lg bg-[#8FE06B]/90 px-3 py-1.5 font-pixel text-sm text-[#1e3a14] shadow hover:bg-[#8FE06B]">🧱 조합</button>
+        <button onClick={goHome} className="rounded-lg bg-black/40 px-3 py-1.5 font-pixel text-sm text-white backdrop-blur hover:bg-black/60">🏡 집으로</button>
       </div>
 
       {/* 도구 벨트 */}
@@ -798,7 +119,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
           const netLocked = t.id === 'net' && !(items.net > 0)
           const on = tool === t.id
           return (
-            <button key={t.id} onClick={() => api.current.selectTool?.(t.id)}
+            <button key={t.id} onClick={() => api.current.selectTool?.(t.id)} aria-label={`${i + 1} ${t.name}`} aria-pressed={on} title={t.name}
               className={`relative flex h-14 w-14 flex-col items-center justify-center rounded-xl font-pixel text-[10px] leading-tight transition ${on ? 'bg-white text-[#24401a] scale-105 shadow-[0_4px_0_#3f7a2e]' : 'bg-white/15 text-white hover:bg-white/25'} ${netLocked ? 'opacity-50' : ''}`}>
               <span className="text-2xl">{t.icon}</span>
               <span className="mt-0.5">{i + 1}</span>
@@ -810,38 +131,43 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       </div>
 
       {/* 시작 안내 */}
-      {!locked && !showCraft && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[24%] flex flex-col items-center gap-1 text-center">
-          <p className="rounded-xl bg-black/55 px-5 py-2 font-pixel text-sm text-white backdrop-blur">클릭 → 시작 · WASD 이동 · Space 점프 · 좌클릭 사용 · 우클릭 블럭설치 · C/E 조합</p>
-          <p className="font-sans text-xs text-white/80 drop-shadow">🪏 모종삽으로 캐서 파밍 → 🧱 잠자리채·폭탄·마취 제작 → 곤충 사냥! (맨손으론 못 잡아요)</p>
+      {paused && !showCraft && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="채집 준비">
+          <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/30 bg-[#172e20]/95 p-5 text-center text-white shadow-2xl">
+            <h2 className="font-pixel text-xl">{H.icon} 곤충월드 탐험</h2>
+            <p className="mt-3 font-sans text-sm leading-relaxed">{items.net > 0 ? '잠자리채로 작은 곤충을 채집해요. 큰 곤충은 먼저 재워 주세요.' : '🪏 나뭇가지 2개와 잎조각 2개를 모아 🥅 잠자리채부터 만들어요.'}</p>
+            <p className="mt-3 whitespace-pre-line rounded-xl bg-black/30 p-3 font-sans text-xs leading-relaxed text-white/80">{touchControls ? '왼쪽 조이스틱으로 이동 · 빈 화면을 드래그해 둘러보기 · 오른쪽 버튼을 눌러 사용·점프' : 'WASD / 방향키 이동 · Shift 달리기 · Space 점프\n마우스를 움직여 시점 변경 · 좌클릭 사용 · 우클릭 설치\n1–5 도구 · C / E 조합 · Esc 일시정지'}</p>
+            <button onPointerDown={e => { resumePointer.current = e.pointerType }} onClick={resume} autoFocus className="mt-4 w-full rounded-xl bg-[#8FE06B] py-3 font-pixel text-base text-[#173b18] shadow-[0_4px_0_#3f7a2e]">탐험 계속하기</button>
+            <div className="mt-3 flex justify-center gap-5 font-sans text-sm"><button onClick={openCraft}>🧱 조합대</button><button onClick={goHome}>🏡 집으로</button></div>
+          </div>
         </div>
       )}
+      {!paused && target && <div className="pointer-events-none absolute left-1/2 top-[55%] -translate-x-1/2 rounded-xl bg-black/65 px-4 py-2 text-center font-sans text-sm text-white">{target}</div>}
 
       {/* 토스트 */}
       {toast && (
-        <div key={toast.key} className="tip-fade absolute left-1/2 top-[20%] -translate-x-1/2 rounded-xl bg-[#2e5a1e]/90 px-5 py-2.5 text-center font-pixel text-sm text-white shadow-lg">
+        <div role="status" key={toast.key} className="pointer-events-none tip-fade absolute left-1/2 top-[20%] z-40 w-max max-w-[90vw] -translate-x-1/2 rounded-xl bg-[#2e5a1e]/90 px-5 py-2.5 text-center font-pixel text-sm text-white shadow-lg">
           {toast.txt}
         </div>
       )}
 
       {/* 모바일 컨트롤 */}
-      <div className="absolute bottom-24 left-6 flex flex-col items-center gap-2 md:hidden">
-        <button onTouchStart={() => api.current.setTouchFwd?.(true)} onTouchEnd={() => api.current.setTouchFwd?.(false)}
-          className="h-20 w-20 rounded-full bg-white/30 font-pixel text-sm text-white backdrop-blur active:bg-white/50">▲<br />앞으로</button>
-        <button onClick={() => api.current.jump?.()} className="h-14 w-20 rounded-full bg-white/25 font-pixel text-xs text-white backdrop-blur active:bg-white/45">⤒ 점프</button>
-      </div>
-      <div className="absolute bottom-24 right-6 flex flex-col items-center gap-2 md:hidden">
-        <button onClick={() => api.current.useTool?.()} className="h-24 w-24 rounded-full bg-[#8FE06B]/80 font-pixel text-base text-[#1e3a14] shadow-lg active:scale-95">{activeTool?.icon}<br />사용</button>
-        <button onClick={() => api.current.place?.()} className="h-14 w-24 rounded-full bg-[#7A5636]/80 font-pixel text-xs text-white shadow active:scale-95">🧱 설치</button>
-      </div>
+      {touchControls && !paused && !showCraft && <>
+        <Joystick onMove={(x, y) => api.current.setMove?.(x, y)} />
+        <div className="absolute right-4 bottom-24 flex items-end gap-2">
+          <HoldButton label="블럭 설치" onStart={() => api.current.place?.()}>🧱<br />설치</HoldButton>
+          <HoldButton label="도구 사용" onStart={() => api.current.holdUse?.(true)} onEnd={() => api.current.holdUse?.(false)}>{activeTool?.icon}<br />사용</HoldButton>
+          <HoldButton label="점프" onStart={() => api.current.jump?.()}>⤒<br />점프</HoldButton>
+        </div>
+      </>}
 
       {/* 🧱 조합 패널 */}
       {showCraft && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 p-4" onClick={() => setShowCraft(false)}>
-          <div className="w-full max-w-lg rounded-2xl border-2 border-white/70 bg-[#20351a]/95 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div role="dialog" aria-modal="true" aria-label="조합대" className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 p-3" onClick={() => setShowCraft(false)}>
+          <div style={{ width: 'min(620px, 96vw)' }} className="hunt-craft max-h-[94dvh] w-full overflow-y-auto overscroll-contain rounded-2xl border-2 border-white/70 bg-[#20351a]/95 p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h2 className="font-pixel text-xl text-white">🧱 조합대 — 포획 블럭</h2>
-              <button onClick={() => setShowCraft(false)} className="rounded-lg bg-white/20 px-3 py-1 font-pixel text-sm text-white hover:bg-white/30">닫기 ✕</button>
+              <button autoFocus onClick={() => setShowCraft(false)} className="rounded-lg bg-white/20 px-3 py-1 font-pixel text-sm text-white hover:bg-white/30">닫기 ✕</button>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {Object.keys(MATERIALS).map((k) => (
@@ -851,11 +177,12 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
             <div className="mt-4 grid gap-3">
               {RECIPES.map((r) => {
                 const enough = Object.entries(r.cost).every(([m, n]) => (mats[m] || 0) >= n)
+                const owned = r.mode === 'tool' && items[r.id] > 0
                 return (
                   <div key={r.id} className="flex items-center gap-3 rounded-xl border border-white/20 bg-black/25 p-3">
                     <span className="text-4xl">{r.icon}</span>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-pixel text-base text-white">{r.name}</h3>
                         <span className="rounded-full bg-[#F2C14E]/90 px-2 py-0.5 font-sans text-[10px] font-bold text-[#3a2a08]">{r.effect}</span>
                         <span className="ml-auto font-sans text-xs text-white/70">보유 {items[r.id] || 0}</span>
@@ -869,9 +196,9 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
                         ))}
                       </div>
                     </div>
-                    <button onClick={() => doCraft(r)} disabled={!enough}
+                    <button aria-label={`${r.name} ${owned ? '보유 중' : '만들기'}`} onClick={() => doCraft(r)} disabled={!enough || owned}
                       className={`shrink-0 rounded-xl px-4 py-2 font-pixel text-sm ${enough ? 'bg-[#8FE06B] text-[#1e3a14] shadow-[0_4px_0_#3f7a2e] active:translate-y-0.5 active:shadow-none' : 'cursor-not-allowed bg-white/15 text-white/50'}`}>
-                      만들기
+                      {owned ? '보유 중' : '만들기'}
                     </button>
                   </div>
                 )
@@ -885,22 +212,13 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
   )
 }
 
-// ── 헬퍼 ──
-// perf(): 테스트/SSR 안전한 타임스탬프 (Date.now 금지 환경 대비 performance.now 우선)
-function perf() { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0 }
-
-// 조합대 상판(넓적한 박스) — Vox boxShape 대체 (얇은 판)
-function boxTop(cx, cy, cz) { return tube(cx - 0.42, cy, cz, cx + 0.42, cy, cz, 0.44, 0.44) }
-
-// 이모지 스프라이트 — 곤충 위에 상태(💫💤🔒)·👑 표시. 캔버스 없으면 null (헤드리스 안전)
-function emojiSprite(emoji) {
-  try {
-    const c = document.createElement('canvas'); c.width = c.height = 64
-    const ctx = c.getContext('2d'); if (!ctx) return null
-    ctx.font = '48px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.fillText(emoji, 32, 36)
-    const tex = new THREE.CanvasTexture(c)
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }))
-    return sp
-  } catch { return null }
+function HoldButton({ label, onStart, onEnd, children }) {
+  const pointer = useRef(null)
+  const endRef = useRef(onEnd); endRef.current = onEnd
+  useEffect(() => () => { if (pointer.current !== null) endRef.current?.() }, [])
+  const release = e => { if (pointer.current !== e.pointerId) return; pointer.current = null; onEnd?.() }
+  return <button aria-label={label} style={{ touchAction: 'none', width: 'clamp(52px, 14vmin, 82px)', height: 'clamp(56px, 16vmin, 90px)' }}
+    onPointerDown={e => { if (pointer.current !== null) return; e.preventDefault(); pointer.current = e.pointerId; e.currentTarget.setPointerCapture(e.pointerId); onStart?.() }}
+    onPointerUp={release} onPointerCancel={release} onLostPointerCapture={release}
+    className="rounded-full border-2 border-white/40 bg-[#20351a]/75 font-pixel text-sm text-white shadow-lg active:bg-[#3f7a2e]">{children}</button>
 }

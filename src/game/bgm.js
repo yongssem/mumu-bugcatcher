@@ -1,12 +1,13 @@
 // BGM 플레이어 — public/bgm/*.mp3 루프 재생 (파일이 없으면 조용히 무시)
-// 화면별 트랙: 랜딩(+메뉴), 마을 허브. 스테이지·보스는 파일 추가 시 연결
+// 무무곤충잡이 오리지널 3곡: 정원·풀잎 탐험·작은 곤충의 집
 // 음소거는 기존 키(mumubug:muted)를 따름
 
 const MUTE_KEY = 'mumubug:muted'
 const VOL_KEY = 'mumubug:bgmvol'
+function readSetting(key) { try { return localStorage.getItem(key) } catch { return null } }
 // 저장된 음악 볼륨 (0~1), 없으면 기본 0.35
 let VOLUME = (() => {
-  const v = parseFloat(localStorage.getItem(VOL_KEY))
+  const v = parseFloat(readSetting(VOL_KEY))
   return isNaN(v) ? 0.35 : Math.max(0, Math.min(1, v))
 })()
 
@@ -16,31 +17,35 @@ export function getBgmVolume() {
 
 // 🎵 음악 볼륨 조절 (0~1) — 즉시 반영 + 저장
 export function setBgmVolume(v) {
-  VOLUME = Math.max(0, Math.min(1, v))
-  localStorage.setItem(VOL_KEY, String(VOLUME))
+  VOLUME = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.35
+  try { localStorage.setItem(VOL_KEY, String(VOLUME)) } catch { /* 저장 차단 시 이번 재생에만 반영 */ }
   if (current && !isMuted()) current.volume = VOLUME
 }
 
 // 트랙 이름 → 파일 경로 (public/bgm/ 아래에 이 이름으로 넣으면 됨)
 const TRACKS = {
-  landing: '/bgm/landing.mp3',   // 1. 랜딩 페이지 (+메뉴까지 이어짐)
-  village: '/bgm/village.mp3',   // 2. 마을 허브
-  field: '/bgm/field.mp3',       // 3-1. 농촌(들판) — 파일 추가 시 사용
-  water: '/bgm/water.mp3',       // 3-2. 어촌(물가)
-  mountain: '/bgm/mountain.mp3', // 3-3. 산촌(산)
-  boss: '/bgm/boss.mp3',         // 4. 보스전
-  creator: '/bgm/creator.mp3',   // 5. 공룡 동물원(크리에이티브)
+  garden: '/bgm/garden-wakeup.mp3',
+  explore: '/bgm/leaf-trails.mp3',
+  home: '/bgm/terrarium-home.mp3',
+  // 남아 있는 구 화면도 재사용 음원 대신 새 곡을 사용한다.
+  landing: '/bgm/garden-wakeup.mp3',
+  village: '/bgm/terrarium-home.mp3',
+  field: '/bgm/leaf-trails.mp3',
+  water: '/bgm/leaf-trails.mp3',
+  mountain: '/bgm/leaf-trails.mp3',
+  boss: '/bgm/leaf-trails.mp3',
+  creator: '/bgm/leaf-trails.mp3',
 }
 
 let current = null
 let currentName = null
 
 function isMuted() {
-  return localStorage.getItem(MUTE_KEY) === '1'
+  return readSetting(MUTE_KEY) === '1'
 }
 
 export function playBgm(name) {
-  if (currentName === name) return // 같은 곡이면 이어서
+  if (currentName === name || (current && current.getAttribute('src') === TRACKS[name])) return // 같은 곡이면 이어서
   stopBgm()
   const src = TRACKS[name]
   if (!src) return

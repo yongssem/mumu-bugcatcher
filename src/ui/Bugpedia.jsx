@@ -1,6 +1,6 @@
 // 📖 곤충 도감 — 게임의 심장. 채집한 곤충이 실루엣→컬러로 해금되고 진짜 지식이 열린다.
 // 왼쪽: 과(科)별 카드 갤러리 / 오른쪽: 선택 곤충 3D 뷰어 + 상세 정보
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BUGS, FAMILIES, RARITY, BUG_ORDER, bugsByFamily, BUG_COUNT } from '../game/bugData.js'
 import { loadBugpedia, bugpediaProgress } from '../save/bugpedia.js'
 import BugViewer from './BugViewer.jsx'
@@ -13,6 +13,13 @@ export default function Bugpedia({ onClose }) {
   const [fam, setFam] = useState('all')
   const [selId, setSel] = useState(BUG_ORDER[0])
   const [quiz, setQuiz] = useState(false)
+  const [wide, setWide] = useState(() => window.matchMedia('(min-width: 768px)').matches)
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 768px)')
+    const update = () => setWide(media.matches)
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
 
   const bug = BUGS[selId]
   const isCaught = (id) => (caughtMap[id]?.n || 0) > 0
@@ -91,13 +98,13 @@ export default function Bugpedia({ onClose }) {
 
         {/* 오른쪽: 상세 + 3D 뷰어 (모바일에선 아래로 접힘 없이 항상 보이게 우측 컬럼 숨김 → 상단 요약 대신 전체폭 갤러리) */}
         <div className="hidden min-w-0 flex-col border-l border-white/10 bg-[#0c121d] md:flex md:w-[42%]">
-          <BugDetail bug={bug} locked={selLocked} caught={caughtMap[selId]} />
+          {wide && !quiz && <BugDetail bug={bug} locked={selLocked} caught={caughtMap[selId]} />}
         </div>
       </div>
 
       {/* 모바일 상세 (하단 시트) */}
       <div className="border-t border-white/10 bg-[#0c121d] md:hidden" style={{ height: '46vh' }}>
-        <BugDetail bug={bug} locked={selLocked} caught={caughtMap[selId]} />
+        {!wide && !quiz && <BugDetail bug={bug} locked={selLocked} caught={caughtMap[selId]} />}
       </div>
     </div>
   )

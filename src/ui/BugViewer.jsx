@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { animateBug } from '../game/BugGen.js'
+import { disposeScene } from '../game/disposeScene.js'
 
 export default function BugViewer({ bug, locked }) {
   const mountRef = useRef(null)
@@ -58,6 +59,7 @@ export default function BugViewer({ bug, locked }) {
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', onResize)
+      if (c.model) { pivot.remove(c.model); disposeScene(c.model); c.model = null }
       renderer.dispose()
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement)
     }
@@ -67,10 +69,13 @@ export default function BugViewer({ bug, locked }) {
   useEffect(() => {
     const c = ctx.current
     if (!c.pivot || !bug) return
-    if (c.model) { c.pivot.remove(c.model); disposeModel(c.model); c.model = null }
+    if (c.model) { c.pivot.remove(c.model); disposeScene(c.model); c.model = null }
     const model = bug.make()
     // 잠긴 곤충: 전부 검은 실루엣으로 (색·정보는 채집해야 열림)
-    if (locked) model.traverse((o) => { if (o.isMesh) { o.material = SIL_MAT; if (o.instanceColor) o.instanceColor = null } })
+    if (locked) {
+      const silhouette = new THREE.MeshLambertMaterial({ color: 0x14161f })
+      model.traverse((o) => { if (o.isMesh) { o.material = silhouette; if (o.instanceColor) o.instanceColor = null } })
+    }
     // 화면에 맞게 크기·중심 조정
     const box = new THREE.Box3().setFromObject(model)
     const size = new THREE.Vector3(); box.getSize(size)
@@ -85,12 +90,4 @@ export default function BugViewer({ bug, locked }) {
   }, [bug, locked])
 
   return <div ref={mountRef} className="h-full w-full" />
-}
-
-const SIL_MAT = new THREE.MeshLambertMaterial({ color: 0x14161f })
-
-function disposeModel(model) {
-  model.traverse((o) => {
-    if (o.isMesh) { o.geometry?.dispose?.(); /* 공용 재질/지오는 유지 */ }
-  })
 }
