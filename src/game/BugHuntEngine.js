@@ -593,7 +593,7 @@ export class BugHuntEngine {
         player.yaw -= dx * sensitivity
         player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch - dy * sensitivity))
       },
-      onFallback: () => notify('마우스를 움직여 둘러보세요 · Esc로 일시정지'),
+      onFallback: () => notify('마우스로 둘러보세요 · 화면 끝에서는 계속 회전해요 · Esc 일시정지'),
     })
     this.controls = controls
     this.pause = () => { this.paused = true; controls.pause(false); onTarget(null) }
@@ -610,6 +610,7 @@ export class BugHuntEngine {
       const dt = Math.min(0.05, (now - last) / 1000); last = now
       if (this.paused || !controls.active) { renderer.render(scene, camera); raf = requestAnimationFrame(loop); return }
       gameTime += dt; cooldown = Math.max(0, cooldown - dt); timers.update(dt)
+      controls.update(dt)
       if (controls.state.held) useTool()
       const moving = stepPlayer(player, controls.sample(), dt, { radius: R, heightAt, solids })
       // 카메라 — 눈높이 + 걷기 상하 bob

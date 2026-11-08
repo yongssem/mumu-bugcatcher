@@ -48,6 +48,37 @@ test('legacy pointer lock errors use free mouse look and notify once', () => {
   assert.equal(s.input.active, true)
   s.input.dispose()
 })
+test('unlocked mouse at the edge keeps rotating beyond a full circle and stops on leave', () => {
+  let yaw = 0
+  const s = setup({ onLook: dx => { yaw -= dx * 0.0022 } })
+  s.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800 })
+  s.input.start(false)
+  const e = new Event('mousemove')
+  Object.assign(e, { movementX: 0, movementY: 0, clientX: 1279, clientY: 400 })
+  Object.defineProperty(e, 'target', { value: s.canvas })
+  s.doc.dispatchEvent(e)
+  for (let i = 0; i < 80; i++) s.input.update(0.05)
+  assert.ok(Math.abs(yaw) > Math.PI * 2)
+  const before = yaw
+  s.canvas.dispatchEvent(new Event('pointerleave'))
+  s.input.update(0.05)
+  assert.equal(yaw, before)
+  s.input.dispose()
+})
+test('native pointer lock disables edge panning to avoid double rotation', () => {
+  let dx = 0
+  const s = setup({ onLook: x => { dx += x } })
+  s.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800 })
+  s.input.start(false)
+  const e = new Event('mousemove')
+  Object.assign(e, { movementX: 0, movementY: 0, clientX: 1279, clientY: 400 })
+  Object.defineProperty(e, 'target', { value: s.canvas })
+  s.doc.dispatchEvent(e)
+  s.doc.pointerLockElement = s.canvas
+  s.input.update(0.05)
+  assert.equal(dx, 0)
+  s.input.dispose()
+})
 test('switching from mouse to touch releases the lock and held actions without pausing', () => {
   let unlocked = 0
   const s = setup()

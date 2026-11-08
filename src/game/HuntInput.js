@@ -13,6 +13,7 @@ export class HuntInput {
     listen(this.doc, 'visibilitychange', () => { if (this.doc.hidden) this.pause() })
     listen(this.doc, 'pointerlockchange', () => {
       const locked = this.doc.pointerLockElement === canvas
+      if (locked) this.edgeX = 0
       if (locked && (!this.active || !this.mouseMode)) { this.doc.exitPointerLock?.(); return }
       if (this.wasLocked && !locked && this.active) this.pause()
       this.wasLocked = locked; this.cb.onLock?.(locked)
@@ -20,8 +21,18 @@ export class HuntInput {
     listen(this.doc, 'pointerlockerror', () => this.fallback())
     listen(this.doc, 'mousemove', e => {
       if (!this.active || !this.mouseMode) return
-      if (this.doc.pointerLockElement === canvas || e.target === canvas) this.cb.onLook?.(e.movementX || 0, e.movementY || 0, false)
+      if (this.doc.pointerLockElement === canvas) { this.edgeX = 0; this.cb.onLook?.(e.movementX || 0, e.movementY || 0, false); return }
+      this.edgeX = 0
+      if (e.target !== canvas) return
+      this.cb.onLook?.(e.movementX || 0, e.movementY || 0, false)
+      const bounds = canvas.getBoundingClientRect?.()
+      if (bounds?.width > 0 && Number.isFinite(e.clientX)) {
+        const margin = Math.min(48, bounds.width * 0.08)
+        const edge = n => Math.max(0, Math.min(1, n)) ** 2
+        this.edgeX = edge((e.clientX - bounds.right + margin) / margin) - edge((bounds.left + margin - e.clientX) / margin)
+      }
     })
+    listen(canvas, 'pointerleave', () => { this.edgeX = 0 })
     listen(canvas, 'contextmenu', e => e.preventDefault())
     listen(canvas, 'pointerdown', e => {
       if (!this.active) return
@@ -32,6 +43,7 @@ export class HuntInput {
         canvas.setPointerCapture?.(e.pointerId)
       } else {
         if (!this.mouseMode) this.setMode(false)
+        else if (this.doc.pointerLockElement !== canvas) this.requestLock()
         if (e.button === 2) this.cb.onPlace?.()
         else if (e.button === 0) { this.state.held = true; this.cb.onUse?.() }
       }
@@ -44,7 +56,7 @@ export class HuntInput {
     const release = e => { if (this.look?.id === e.pointerId) this.look = null; if (e.pointerType !== 'touch') this.state.held = false }
     listen(this.doc, 'pointerup', release); listen(canvas, 'pointercancel', release); listen(canvas, 'lostpointercapture', release)
   }
-  reset() { this.state = { f: false, b: false, l: false, r: false, run: false, jump: false, held: false, moveX: 0, moveY: 0 }; this.look = null }
+  reset() { this.state = { f: false, b: false, l: false, r: false, run: false, jump: false, held: false, moveX: 0, moveY: 0 }; this.look = null; this.edgeX = 0 }
   start(touch = false) {
     this.reset(); this.active = true
     this.setMode(touch)
@@ -59,8 +71,15 @@ export class HuntInput {
       if (this.doc.pointerLockElement === this.canvas) this.doc.exitPointerLock?.()
       return
     }
+    this.requestLock()
+  }
+  requestLock() {
     if (!this.canvas.requestPointerLock) { this.fallback(); return }
     try { this.canvas.requestPointerLock()?.catch?.(() => this.fallback()) } catch { this.fallback() }
+  }
+  update(dt) {
+    // 잠금이 안 되는 내장 브라우저에서도 화면 끝에서 회전을 이어간다.
+    if (this.active && this.mouseMode && this.doc.pointerLockElement !== this.canvas && this.edgeX) this.cb.onLook?.(this.edgeX * 1800 * Math.min(0.05, dt), 0, false)
   }
   fallback() {
     if (!this.active || !this.mouseMode || this.lockFailed) return

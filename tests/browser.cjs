@@ -62,13 +62,50 @@ async function aimNode(page, drop) {
     await denied.waitForFunction(yaw => __hunt.player.yaw !== yaw, yaw, { timeout: 2000 })
     assert.equal(await denied.evaluate(() => __hunt.controls.state.held), false)
     assert.equal(await denied.locator('canvas').evaluate(c => getComputedStyle(c).cursor), 'none')
+    await denied.mouse.move(1278, 400)
+    const edgeYaw = await denied.evaluate(() => __hunt.player.yaw)
+    await denied.waitForFunction(before => __hunt.player.yaw < before - Math.PI * 2, edgeYaw, { timeout: 8000 })
+    await denied.mouse.move(2, 400)
+    const reverseYaw = await denied.evaluate(() => __hunt.player.yaw)
+    await denied.waitForFunction(before => __hunt.player.yaw > before + Math.PI * 2, reverseYaw, { timeout: 8000 })
+    assert.equal(await denied.evaluate(() => __hunt.controls.state.held), false)
     await denied.keyboard.press('Escape')
     assert.notEqual(await denied.locator('canvas').evaluate(c => getComputedStyle(c).cursor), 'none')
     await context.close()
   })
   const desktop = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  await desktop.addInitScript(() => {
+    const NativeAudio = window.Audio
+    window.__musicInstances = []
+    window.Audio = function(...args) { const audio = new NativeAudio(...args); window.__musicInstances.push(audio); return audio }
+  })
   const page = await desktop.newPage()
   await enter(page)
+  await check('new original soundtrack files decode as non-silent stereo loops and exploration music plays', async () => {
+    const tracks = await page.evaluate(async () => {
+      const context = new AudioContext()
+      const tracks = []
+      try {
+        for (const file of ['garden-wakeup.mp3', 'leaf-trails.mp3', 'terrarium-home.mp3']) {
+          const response = await fetch('/bgm/' + file)
+          if (!response.ok) throw new Error(file + ': ' + response.status)
+          const audio = await context.decodeAudioData(await response.arrayBuffer())
+          const samples = audio.getChannelData(0)
+          let peak = 0, sum = 0
+          for (let i = 0; i < samples.length; i++) { peak = Math.max(peak, Math.abs(samples[i])); sum += samples[i] ** 2 }
+          tracks.push({ file, duration: audio.duration, channels: audio.numberOfChannels, peak, rms: Math.sqrt(sum / samples.length), loopStep: Math.abs(samples[0] - samples[samples.length - 1]) })
+        }
+      } finally { await context.close() }
+      return tracks
+    })
+    for (const track of tracks) {
+      assert.equal(track.channels, 2)
+      assert.ok(track.duration > 60 && track.duration < 100)
+      assert.ok(track.peak < 0.99 && track.rms > 0.01)
+      assert.ok(track.loopStep < 0.1)
+    }
+    await page.waitForFunction(() => window.__musicInstances.at(-1)?.src.includes('leaf-trails.mp3') && window.__musicInstances.at(-1).currentTime > 0.2)
+  })
   await check('all starter materials exist and world waits for deliberate start', async () => {
     const state = await page.evaluate(() => ({ drops: __hunt.nodes.map(n => n.userData.node.drop), paused: __hunt.engine.paused }))
     assert.deepEqual([...new Set(state.drops)].sort(), ['dew', 'dirt', 'leaf', 'pollen', 'sap', 'twig'])
@@ -123,6 +160,7 @@ async function aimNode(page, drop) {
     assert.ok(await page.evaluate(id => JSON.parse(localStorage.getItem('mumubug:bugpedia:v1'))[id].n >= 1, id))
     await page.keyboard.press('Escape')
     await page.getByRole('dialog', { name: '채집 준비' }).getByRole('button', { name: '🏡 집으로' }).click()
+    await page.waitForFunction(() => window.__musicInstances.at(-1)?.src.includes('terrarium-home.mp3') && window.__musicInstances.at(-1).currentTime > 0.1)
     await page.getByRole('button', { name: '📖 도감', exact: true }).click()
     await page.getByRole('button', { name: '닫기 ✕', exact: true }).click()
     await page.getByRole('heading', { name: /무무의 집/ }).waitFor()

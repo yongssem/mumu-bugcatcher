@@ -1,5 +1,5 @@
 // BGM 플레이어 — public/bgm/*.mp3 루프 재생 (파일이 없으면 조용히 무시)
-// 화면별 트랙: 랜딩(+메뉴), 마을 허브. 스테이지·보스는 파일 추가 시 연결
+// 무무곤충잡이 오리지널 3곡: 정원·풀잎 탐험·작은 곤충의 집
 // 음소거는 기존 키(mumubug:muted)를 따름
 
 const MUTE_KEY = 'mumubug:muted'
@@ -24,13 +24,17 @@ export function setBgmVolume(v) {
 
 // 트랙 이름 → 파일 경로 (public/bgm/ 아래에 이 이름으로 넣으면 됨)
 const TRACKS = {
-  landing: '/bgm/landing.mp3',   // 1. 랜딩 페이지 (+메뉴까지 이어짐)
-  village: '/bgm/village.mp3',   // 2. 마을 허브
-  field: '/bgm/field.mp3',       // 3-1. 농촌(들판) — 파일 추가 시 사용
-  water: '/bgm/water.mp3',       // 3-2. 어촌(물가)
-  mountain: '/bgm/mountain.mp3', // 3-3. 산촌(산)
-  boss: '/bgm/boss.mp3',         // 4. 보스전
-  creator: '/bgm/creator.mp3',   // 5. 공룡 동물원(크리에이티브)
+  garden: '/bgm/garden-wakeup.mp3',
+  explore: '/bgm/leaf-trails.mp3',
+  home: '/bgm/terrarium-home.mp3',
+  // 남아 있는 구 화면도 재사용 음원 대신 새 곡을 사용한다.
+  landing: '/bgm/garden-wakeup.mp3',
+  village: '/bgm/terrarium-home.mp3',
+  field: '/bgm/leaf-trails.mp3',
+  water: '/bgm/leaf-trails.mp3',
+  mountain: '/bgm/leaf-trails.mp3',
+  boss: '/bgm/leaf-trails.mp3',
+  creator: '/bgm/leaf-trails.mp3',
 }
 
 let current = null
@@ -41,7 +45,7 @@ function isMuted() {
 }
 
 export function playBgm(name) {
-  if (currentName === name) return // 같은 곡이면 이어서
+  if (currentName === name || (current && current.getAttribute('src') === TRACKS[name])) return // 같은 곡이면 이어서
   stopBgm()
   const src = TRACKS[name]
   if (!src) return

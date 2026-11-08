@@ -19,10 +19,11 @@ export default function App() {
   const [pediaReturn, setPediaReturn] = useState('menu')
   const openPedia = from => { setPediaReturn(from); setScreen('pedia') }
 
-  // 🎵 BGM — 화면에 맞는 곡 (곤충 오픈월드는 밝은 크리에이터 무드 재사용)
+  // 🎵 이 게임을 위해 새로 만든 곡을 화면별로 재생한다.
   useEffect(() => {
-    if (screen === 'landing' || screen === 'intro' || screen === 'menu' || screen === 'careers' || screen === 'home' || screen === 'worldselect') playBgm('landing')
-    else if (screen === 'pedia' || screen === 'micro' || screen === 'hunt') playBgm('creator')
+    if (screen === 'home' || screen === 'pedia') playBgm('home')
+    else if (screen === 'micro' || screen === 'hunt') playBgm('explore')
+    else playBgm('garden')
   }, [screen])
 
   // 📱 글로벌 UI 스케일 — 루트 폰트 크기를 뷰포트에 맞춰 조절
