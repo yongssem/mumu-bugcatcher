@@ -24,7 +24,7 @@ const RWEIGHT = { common: 6, uncommon: 3, rare: 1.4, epic: 0.6 }
 const TOOLS = ['trowel', 'net', 'bomb', 'dart', 'trap']
 
 export class BugHuntEngine {
-  constructor(mount, { habitat, inventory, onToast, onInventory, onCaught, onTool, onTarget, onPause, onCraft }) {
+  constructor(mount, { habitat, inventory, onToast, onInventory, onCaught, onTool, onTarget, onPause, onCraft, onInputMode }) {
     this.inventory = inventory; this.tool = 'trowel'; this.paused = true; this.disposed = false
     const H = HABITATS[habitat] || HABITATS[DEFAULT_HABITAT]
     const habitatId = HABITATS[habitat] ? habitat : DEFAULT_HABITAT
@@ -586,20 +586,20 @@ export class BugHuntEngine {
     
     // 입력은 전용 컨트롤러가 해제·포커스·멀티터치를 관리한다.
     const controls = new HuntInput(canvas, {
-      onPause, onCraft, onUse: () => useTool(), onPlace: () => placeBlock(),
+      onPause, onCraft, onInputMode, onUse: () => useTool(), onPlace: () => placeBlock(),
       onTool: i => this.selectTool(TOOLS[i]),
       onLook: (dx, dy, touch) => {
         const sensitivity = touch ? 0.004 : 0.0022
         player.yaw -= dx * sensitivity
         player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch - dy * sensitivity))
       },
-      onFallback: () => notify('마우스를 누른 채 드래그하면 시점을 돌릴 수 있어요'),
+      onFallback: () => notify('마우스를 움직여 둘러보세요 · Esc로 일시정지'),
     })
     this.controls = controls
     this.pause = () => { this.paused = true; controls.pause(false); onTarget(null) }
     this.start = touch => { this.paused = false; controls.start(touch) }
     this.setMove = (x, y) => { if (controls.active) { controls.state.moveX = x; controls.state.moveY = y } }
-    this.holdUse = value => { controls.state.held = controls.active && value; if (value) useTool() }
+    this.holdUse = value => { if (controls.mouseMode) return; controls.state.held = controls.active && value; if (value) useTool() }
     this.jump = () => { if (controls.active) controls.state.jump = true }
     if (import.meta.env.DEV) Object.assign(window.__hunt, { player, controls, engine: this, camera, solids, timers })
     

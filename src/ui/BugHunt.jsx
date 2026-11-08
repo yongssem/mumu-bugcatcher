@@ -35,10 +35,15 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
   const [paused, setPaused] = useState(true)
   const [target, setTarget] = useState(null)
   const isTouch = useIsTouch()
+  const [touchControls, setTouchControls] = useState(isTouch)
+  const resumePointer = useRef('mouse')
   const [showCraft, setShowCraft] = useState(false)
   const pause = () => { api.current.pause?.(); setPaused(true) }
   const openCraft = () => { pause(); setShowCraft(true) }
-  const resume = () => { setShowCraft(false); setPaused(false); api.current.start?.(isTouch) }
+  const resume = e => {
+    const touch = e.detail !== 0 && (e.nativeEvent?.pointerType || resumePointer.current) === 'touch'
+    setShowCraft(false); setPaused(false); api.current.start?.(touch)
+  }
   const goHome = () => { pause(); onHome() }
   useEffect(() => {
     if (!toast) return
@@ -68,7 +73,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       habitat, inventory: invRef.current,
       onInventory: inv => { setMats({ ...inv.mats }); setItems({ ...inv.items }) },
       onToast: txt => setToast({ txt, key: performance.now() + Math.random() }),
-      onCaught: setCaught, onTool: setTool, onTarget: setTarget,
+      onCaught: setCaught, onTool: setTool, onTarget: setTarget, onInputMode: setTouchControls,
       onPause: () => { engine.pause(); setPaused(true) },
       onCraft: () => { engine.pause(); setPaused(true); setShowCraft(v => !v) },
     })
@@ -131,8 +136,8 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
           <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-white/30 bg-[#172e20]/95 p-5 text-center text-white shadow-2xl">
             <h2 className="font-pixel text-xl">{H.icon} 곤충월드 탐험</h2>
             <p className="mt-3 font-sans text-sm leading-relaxed">{items.net > 0 ? '잠자리채로 작은 곤충을 채집해요. 큰 곤충은 먼저 재워 주세요.' : '🪏 나뭇가지 2개와 잎조각 2개를 모아 🥅 잠자리채부터 만들어요.'}</p>
-            <p className="mt-3 whitespace-pre-line rounded-xl bg-black/30 p-3 font-sans text-xs leading-relaxed text-white/80">{isTouch ? '왼쪽 조이스틱으로 이동 · 빈 화면을 드래그해 둘러보기 · 오른쪽 버튼을 눌러 사용·점프' : 'WASD / 방향키 이동 · Shift 달리기 · Space 점프\n마우스 시점 · 좌클릭 사용(꾹 누르기 가능) · 우클릭 설치\n1–5 도구 · C / E 조합 · Esc 일시정지'}</p>
-            <button onClick={resume} autoFocus className="mt-4 w-full rounded-xl bg-[#8FE06B] py-3 font-pixel text-base text-[#173b18] shadow-[0_4px_0_#3f7a2e]">탐험 계속하기</button>
+            <p className="mt-3 whitespace-pre-line rounded-xl bg-black/30 p-3 font-sans text-xs leading-relaxed text-white/80">{touchControls ? '왼쪽 조이스틱으로 이동 · 빈 화면을 드래그해 둘러보기 · 오른쪽 버튼을 눌러 사용·점프' : 'WASD / 방향키 이동 · Shift 달리기 · Space 점프\n마우스를 움직여 시점 변경 · 좌클릭 사용 · 우클릭 설치\n1–5 도구 · C / E 조합 · Esc 일시정지'}</p>
+            <button onPointerDown={e => { resumePointer.current = e.pointerType }} onClick={resume} autoFocus className="mt-4 w-full rounded-xl bg-[#8FE06B] py-3 font-pixel text-base text-[#173b18] shadow-[0_4px_0_#3f7a2e]">탐험 계속하기</button>
             <div className="mt-3 flex justify-center gap-5 font-sans text-sm"><button onClick={openCraft}>🧱 조합대</button><button onClick={goHome}>🏡 집으로</button></div>
           </div>
         </div>
@@ -147,7 +152,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
       )}
 
       {/* 모바일 컨트롤 */}
-      {isTouch && !paused && !showCraft && <>
+      {touchControls && !paused && !showCraft && <>
         <Joystick onMove={(x, y) => api.current.setMove?.(x, y)} />
         <div className="absolute right-4 bottom-24 flex items-end gap-2">
           <HoldButton label="블럭 설치" onStart={() => api.current.place?.()}>🧱<br />설치</HoldButton>
@@ -210,7 +215,7 @@ export default function BugHunt({ onHome, habitat = DEFAULT_HABITAT }) {
 function HoldButton({ label, onStart, onEnd, children }) {
   const pointer = useRef(null)
   const endRef = useRef(onEnd); endRef.current = onEnd
-  useEffect(() => () => endRef.current?.(), [])
+  useEffect(() => () => { if (pointer.current !== null) endRef.current?.() }, [])
   const release = e => { if (pointer.current !== e.pointerId) return; pointer.current = null; onEnd?.() }
   return <button aria-label={label} style={{ touchAction: 'none', width: 'clamp(52px, 14vmin, 82px)', height: 'clamp(56px, 16vmin, 90px)' }}
     onPointerDown={e => { if (pointer.current !== null) return; e.preventDefault(); pointer.current = e.pointerId; e.currentTarget.setPointerCapture(e.pointerId); onStart?.() }}

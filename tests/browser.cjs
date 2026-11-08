@@ -16,7 +16,7 @@ async function enter(page, query = '') {
   await page.getByRole('button', { name: /꽃밭/ }).click()
   await page.waitForFunction(() => !!window.__hunt?.engine)
 }
-async function resume(page) { await page.getByRole('button', { name: '탐험 계속하기' }).click(); await page.waitForFunction(() => __hunt.controls.active) }
+async function resume(page, touch = false) { await page.getByRole('button', { name: '탐험 계속하기' })[touch ? 'tap' : 'click'](); await page.waitForFunction(() => __hunt.controls.active) }
 async function aimNode(page, drop) {
   return page.evaluate(drop => {
     const n = __hunt.nodes.find(n => n.userData.node.drop === drop)
@@ -30,6 +30,42 @@ async function aimNode(page, drop) {
 (async () => {
   await fs.mkdir(output, { recursive: true })
   browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome' })
+  await check('touch-capable PC still enters mouse look when started with a mouse', async () => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, hasTouch: true })
+    const hybrid = await context.newPage()
+    await enter(hybrid); await resume(hybrid)
+    await hybrid.waitForFunction(() => document.pointerLockElement === document.querySelector('canvas'), null, { timeout: 2000 })
+    const yaw = await hybrid.evaluate(() => __hunt.player.yaw)
+    await hybrid.mouse.move(680, 400)
+    await hybrid.waitForFunction(yaw => __hunt.player.yaw !== yaw, yaw)
+    assert.equal(await hybrid.evaluate(() => __hunt.controls.state.held), false)
+    assert.equal(await hybrid.getByRole('group', { name: '이동 조이스틱' }).count(), 0)
+    await hybrid.keyboard.press('Escape')
+    await resume(hybrid, true)
+    await hybrid.getByRole('group', { name: '이동 조이스틱' }).waitFor()
+    await hybrid.mouse.move(640, 400)
+    await hybrid.mouse.down()
+    await hybrid.waitForTimeout(80)
+    assert.equal(await hybrid.evaluate(() => __hunt.controls.state.held), true, 'old touch controls must not cancel the first held mouse action')
+    await hybrid.mouse.up()
+    assert.equal(await hybrid.evaluate(() => __hunt.controls.state.held), false)
+    await context.close()
+  })
+  await check('denied pointer lock keeps click-free mouse look and hides the canvas cursor', async () => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    await context.addInitScript(() => { Element.prototype.requestPointerLock = () => Promise.reject(new DOMException('blocked', 'NotAllowedError')) })
+    const denied = await context.newPage()
+    await enter(denied); await resume(denied)
+    await denied.mouse.move(640, 400)
+    const yaw = await denied.evaluate(() => __hunt.player.yaw)
+    await denied.mouse.move(700, 420)
+    await denied.waitForFunction(yaw => __hunt.player.yaw !== yaw, yaw, { timeout: 2000 })
+    assert.equal(await denied.evaluate(() => __hunt.controls.state.held), false)
+    assert.equal(await denied.locator('canvas').evaluate(c => getComputedStyle(c).cursor), 'none')
+    await denied.keyboard.press('Escape')
+    assert.notEqual(await denied.locator('canvas').evaluate(c => getComputedStyle(c).cursor), 'none')
+    await context.close()
+  })
   const desktop = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const page = await desktop.newPage()
   await enter(page)
@@ -148,7 +184,7 @@ async function aimNode(page, drop) {
     await context.close()
   })
   const mobile = await mobileContext.newPage()
-  await enter(mobile, '?touch=1'); await resume(mobile)
+  await enter(mobile, '?touch=1'); await resume(mobile, true)
   await check('landscape phone exposes four-direction joystick, look drag and action buttons', async () => {
     await mobile.getByRole('group', { name: '이동 조이스틱' }).waitFor()
     await mobile.getByRole('button', { name: '도구 사용', exact: true }).waitFor()
@@ -183,7 +219,7 @@ async function aimNode(page, drop) {
     await mobile.getByRole('dialog', { name: '채집 준비' }).waitFor()
     assert.equal(await mobile.evaluate(() => __hunt.engine === window.savedHuntEngine), true)
     assert.equal(await mobile.getByRole('dialog', { name: '조합대', exact: true }).count(), 0)
-    await resume(mobile)
+    await resume(mobile, true)
   })
   await check('small landscape craft panel scrolls and every recipe is reachable', async () => {
     await mobile.getByRole('button', { name: '🧱 조합', exact: true }).click()
@@ -196,7 +232,7 @@ async function aimNode(page, drop) {
     await mobile.screenshot({ path: path.join(output, 'mobile-craft.png') })
   })
   await check('tablet keeps touch controls; focus loss pauses and cancels actions', async () => {
-    await mobile.getByRole('button', { name: '닫기 ✕', exact: true }).click(); await resume(mobile)
+    await mobile.getByRole('button', { name: '닫기 ✕', exact: true }).click(); await resume(mobile, true)
     await mobile.setViewportSize({ width: 1180, height: 820 })
     assert.equal(await mobile.getByRole('group', { name: '이동 조이스틱' }).isVisible(), true)
     await mobile.evaluate(() => window.dispatchEvent(new Event('blur')))
